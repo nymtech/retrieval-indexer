@@ -1,0 +1,11 @@
+# Single-package repo. This file exists only to control which dependency build
+# scripts pnpm runs: esbuild (vitest's bundler) yes, the tree-sitter grammars no.
+# The package loads each grammar's prebuilt .wasm with web-tree-sitter, so their
+# native Node bindings are never built.
+allowBuilds:
+  esbuild: true
+  tree-sitter-go: false
+  tree-sitter-javascript: false
+  tree-sitter-python: false
+  tree-sitter-rust: false
+  tree-sitter-typescript: false
