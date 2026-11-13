@@ -43,17 +43,23 @@ const RUST_KINDS: Record<string, string> = {
   associated_type: 'type',
 };
 
-const parsers = new Map<Grammar, Parser>();
+// Cache the promise, not the parser: concurrent first calls must share one
+// Language.load, because web-tree-sitter fails when it loads one grammar twice at once.
+const parsers = new Map<Grammar, Promise<Parser>>();
+let runtime: Promise<void> | undefined;
 
-async function parserFor(grammar: Grammar): Promise<Parser> {
+function parserFor(grammar: Grammar): Promise<Parser> {
   const cached = parsers.get(grammar);
   if (cached) return cached;
-  if (!Object.hasOwn(GRAMMARS, grammar)) throw new Error(`no grammar for language "${grammar}"`);
-  await Parser.init();
-  const parser = new Parser();
-  parser.setLanguage(await Language.load(require.resolve(GRAMMARS[grammar])));
-  parsers.set(grammar, parser);
-  return parser;
+  if (!Object.hasOwn(GRAMMARS, grammar)) return Promise.reject(new Error(`no grammar for language "${grammar}"`));
+  const loading = (async () => {
+    await (runtime ??= Parser.init());
+    const parser = new Parser();
+    parser.setLanguage(await Language.load(require.resolve(GRAMMARS[grammar])));
+    return parser;
+  })();
+  parsers.set(grammar, loading);
+  return loading;
 }
 
 /** Parse `text` and pass the root node to `read`. The tree lives in WASM memory, so it is freed after `read`. */
