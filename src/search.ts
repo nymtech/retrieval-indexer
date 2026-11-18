@@ -75,10 +75,27 @@ export async function modalities(db: Connection): Promise<Set<Modality>> {
  * Rank a modality's chunks against `queryVector`, which the caller embedded with
  * the modality's model (modalityModel). A vector of another dimension is an
  * error, not an empty result.
+ *
+ * With `model`, the caller names the model it embedded the query with. Then a
+ * modality with no shard, or rows of another model, is an error too: a query
+ * from another model with the same dimension would otherwise rank against the
+ * wrong space and return confident, wrong neighbours. The check reads the same
+ * row as the dimension check, so it costs no extra query.
  */
-export async function search(db: Connection, modality: Modality, queryVector: number[], { topK = 6 }: { topK?: number } = {}): Promise<StoreHit[]> {
+export async function search(
+  db: Connection,
+  modality: Modality,
+  queryVector: number[],
+  { topK = 6, model }: { topK?: number; model?: string } = {},
+): Promise<StoreHit[]> {
   const embedded = await modalityModel(db, modality);
-  if (!embedded) return [];
+  if (!embedded) {
+    if (model !== undefined) throw new Error(`the store has no ${modality} shard`);
+    return [];
+  }
+  if (model !== undefined && embedded.model !== model) {
+    throw new Error(`the store's ${modality} rows are embedded with ${embedded.model}, but the query is embedded with ${model}`);
+  }
   if (queryVector.length !== embedded.dim) {
     throw new Error(`a ${queryVector.length}-dim query against ${modality} rows embedded at ${embedded.dim} (${embedded.model})`);
   }
@@ -91,15 +108,21 @@ export async function search(db: Connection, modality: Modality, queryVector: nu
  * split into `id~0`, `id~1`, ... parts with one url; this rejoins them in part
  * order, so a caller gets the section, not a fragment. An id match wins over a
  * url match.
+ *
+ * Ids are unique only as whole values, so two shards can hold the same base id
+ * (one as `x`, another as `x~0`, `x~1`). The parts are taken from one shard: the
+ * shard with an exact id match, or else the first shard by name.
  */
 export async function getSection(db: Connection, idOrUrl: string): Promise<StoreChunk | null> {
-  const select = `select id, source, title, heading, url, text, lang, tokens_est, test from chunks where modality = 'docs' and`;
-  const byId = await db.query<ChunkRow>(`${select} (id = $1 or split_part(id, '~', 1) = $1)`, [idOrUrl]);
-  const { rows } = byId.rows.length ? byId : await db.query<ChunkRow>(`${select} url = $1`, [idOrUrl]);
+  const select = `select id, shard, source, title, heading, url, text, lang, tokens_est, test from chunks where modality = 'docs' and`;
+  type SectionRow = ChunkRow & { shard: string };
+  const byId = await db.query<SectionRow>(`${select} (id = $1 or split_part(id, '~', 1) = $1)`, [idOrUrl]);
+  const { rows } = byId.rows.length ? byId : await db.query<SectionRow>(`${select} url = $1`, [idOrUrl]);
   if (rows.length === 0) return null;
 
+  const shard = rows.find((r) => r.id === idOrUrl)?.shard ?? rows.map((r) => r.shard).sort()[0]!;
   const part = (id: string) => Number(id.split('~')[1] ?? 0);
-  const ordered = [...rows].sort((a, b) => part(a.id) - part(b.id));
+  const ordered = rows.filter((r) => r.shard === shard).sort((a, b) => part(a.id) - part(b.id));
   const head = ordered[0]!;
   return { ...toChunk(head), id: head.id.split('~')[0]!, text: ordered.map((r) => r.text).join('\n\n') };
 }

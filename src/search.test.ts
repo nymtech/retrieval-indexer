@@ -98,6 +98,20 @@ describe('search', () => {
   it('returns nothing for a modality with no shard', async () => {
     expect(await search(db, 'code', [1, 0, 0])).toEqual([]);
   });
+
+  it('with a model, refuses a modality with no shard instead of returning nothing', async () => {
+    await expect(search(db, 'code', [1, 0, 0], { model: 'fixed' })).rejects.toThrow(/has no code shard/);
+  });
+
+  it('with a model, refuses rows of another model of the same dimension', async () => {
+    await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('e', 'east')], provider: fixed('other') });
+    await expect(search(db, 'docs', [1, 0, 0], { model: 'fixed' })).rejects.toThrow(/embedded with other, but the query is embedded with fixed/);
+  });
+
+  it('with the matching model, ranks as without one', async () => {
+    await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('e', 'east')], provider: fixed() });
+    expect((await search(db, 'docs', [1, 0, 0], { model: 'fixed' })).map((h) => h.chunk.id)).toEqual(['e']);
+  });
 });
 
 describe('getSection', () => {
@@ -119,6 +133,17 @@ describe('getSection', () => {
     await indexShard(db, { repo: 'nym', modality: 'docs', chunks: parts, provider: fixed() });
     expect((await getSection(db, 'https://d/page#install'))?.text).toBe(parts.map((p) => p.text).join('\n\n'));
     expect(await getSection(db, 'page#install~3')).toMatchObject({ id: 'page#install', text: 'part 3' });
+  });
+
+  it('takes the parts of a section from one shard when two shards share a base id', async () => {
+    VECTORS['nym text'] = [1, 0, 0];
+    VECTORS['vpn part 0'] = [1, 0, 0];
+    VECTORS['vpn part 1'] = [1, 0, 0];
+    await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('x', 'nym text', { url: 'https://d/x' })], provider: fixed() });
+    const vpn = [doc('x~0', 'vpn part 0', { url: 'https://d/x' }), doc('x~1', 'vpn part 1', { url: 'https://d/x' })];
+    await indexShard(db, { repo: 'vpn', modality: 'docs', chunks: vpn, provider: fixed() });
+    expect((await getSection(db, 'x'))?.text).toBe('nym text');
+    expect((await getSection(db, 'https://d/x'))?.text).toBe('nym text');
   });
 
   it('reads docs only, and returns null for an unknown ref', async () => {
