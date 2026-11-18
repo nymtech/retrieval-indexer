@@ -58,6 +58,20 @@ describe('indexShard', () => {
     expect(await rows()).toHaveLength(1);
   });
 
+  it('with maxShrink, refuses a run that drops too many rows before embedding, and lets a smaller drop through', async () => {
+    const five = ['a', 'b', 'c', 'd', 'e'].map((id) => chunk(id, id.toUpperCase()));
+    await indexShard(db, { repo: 'nym', modality: 'code', chunks: five, provider: countingProvider() });
+
+    const refused = countingProvider();
+    await expect(indexShard(db, { repo: 'nym', modality: 'code', chunks: [...five.slice(0, 2), chunk('f', 'F')], provider: refused, maxShrink: 0.2 }))
+      .rejects.toThrow(/nym\/code: this run has 3 chunks, but the store holds 5/);
+    expect(refused.state.texts).toBe(0);
+    expect(await rows()).toHaveLength(5);
+
+    expect((await indexShard(db, { repo: 'nym', modality: 'code', chunks: five.slice(0, 4), provider: countingProvider(), maxShrink: 0.2 })).deleted).toBe(1);
+    expect((await indexShard(db, { repo: 'nym', modality: 'code', chunks: five.slice(0, 2), provider: countingProvider() })).deleted).toBe(2);
+  });
+
   it('refuses an id another shard owns and writes nothing', async () => {
     await indexShard(db, { repo: 'nym', modality: 'code', chunks: [chunk('a', 'A')], provider: countingProvider() });
     await expect(indexShard(db, { repo: 'vpn', modality: 'code', chunks: [chunk('a', 'other'), chunk('z', 'Z')], provider: countingProvider() }))

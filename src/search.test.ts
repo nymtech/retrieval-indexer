@@ -3,7 +3,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import type { EmbedProvider } from './embed.js';
 import { getSection, modalities, modalityModel, search, staleShards, TEST_SCORE_PENALTY } from './search.js';
-import { ensureSchema, indexShard, type StoreChunk } from './store.js';
+import { ensureSchema, indexShard, type Connection, type StoreChunk } from './store.js';
 
 // Each chunk's text names its vector, so a test controls every score. The text
 // is the last line of what embedChunks sends (title, heading, then text).
@@ -111,6 +111,23 @@ describe('search', () => {
   it('with the matching model, ranks as without one', async () => {
     await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('e', 'east')], provider: fixed() });
     expect((await search(db, 'docs', [1, 0, 0], { model: 'fixed' })).map((h) => h.chunk.id)).toEqual(['e']);
+  });
+
+  it('ranks only rows of the model it checked when a migration commits between the check and the ranking', async () => {
+    await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('e', 'east')], provider: fixed('old') });
+    let migrated = false;
+    const racing: Connection = {
+      async query<T>(text: string, params?: unknown[]) {
+        const result = await db.query<T>(text, params);
+        if (!migrated) {
+          migrated = true;
+          await indexShard(db, { repo: 'nym', modality: 'docs', chunks: [doc('e', 'east', { heading: 'moved' })], provider: fixed('new') });
+        }
+        return result;
+      },
+    };
+    expect(await search(racing, 'docs', [1, 0, 0], { model: 'old' })).toEqual([]);
+    expect(migrated).toBe(true);
   });
 });
 

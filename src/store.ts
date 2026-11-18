@@ -149,12 +149,18 @@ async function checkIds(db: Connection, plans: Plan[]): Promise<void> {
  * was embedding. The id and model checks run once before embedding, so a
  * misconfigured producer fails before it pays for an embed, and again under the
  * lock.
+ *
+ * With `maxShrink`, it also throws on a run that has fewer than
+ * `(1 - maxShrink)` of the rows its shard holds: a lost content directory or a
+ * broken walk would otherwise delete that part of the index. The check counts
+ * the baseline that the lock later proves unchanged, so no other writer can
+ * commit between the count and the write.
  */
 export async function indexShards(
   db: Connection,
   modality: Modality,
   runs: ShardRun[],
-  { provider, concurrency }: { provider: EmbedProvider; concurrency?: number },
+  { provider, concurrency, maxShrink }: { provider: EmbedProvider; concurrency?: number; maxShrink?: number },
 ): Promise<Map<string, ShardStats>> {
   // A pg.Pool satisfies Connection structurally but runs each statement on its
   // own pooled connection, so begin, the advisory lock, and commit would not
@@ -176,6 +182,9 @@ export async function indexShards(
   for (const run of runs) {
     const shard = `${run.repo}/${modality}`;
     const before = await shardHashes(db, shard);
+    if (maxShrink !== undefined && run.chunks.length < before.size * (1 - maxShrink)) {
+      throw new Error(`shard ${shard}: this run has ${run.chunks.length} chunks, but the store holds ${before.size}; refusing to delete ${before.size - run.chunks.length} rows`);
+    }
     const hashes = new Map(run.chunks.map((c) => [c.id, chunkHash(c, provider)]));
     plans.push({
       ...run,
@@ -218,16 +227,17 @@ export async function indexShards(
 /** Replace one shard. A thin form of indexShards for the common single-producer run. */
 export async function indexShard(
   db: Connection,
-  { repo, modality, chunks, provider, sourceRev = null, concurrency }: {
+  { repo, modality, chunks, provider, sourceRev = null, concurrency, maxShrink }: {
     repo: string;
     modality: Modality;
     chunks: StoreChunk[];
     provider: EmbedProvider;
     sourceRev?: string | null;
     concurrency?: number;
+    maxShrink?: number;
   },
 ): Promise<ShardStats> {
-  const stats = await indexShards(db, modality, [{ repo, chunks, sourceRev }], { provider, concurrency });
+  const stats = await indexShards(db, modality, [{ repo, chunks, sourceRev }], { provider, concurrency, maxShrink });
   return stats.get(`${repo}/${modality}`)!;
 }
 

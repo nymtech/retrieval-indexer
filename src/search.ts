@@ -20,15 +20,20 @@ export interface StoreHit {
 /**
  * Cosine similarity minus the test-code penalty, kept at 0 or above, best
  * first, `id` breaking ties. Parameters: $1 modality, $2 query vector as
- * pgvector text, $3 penalty, $4 limit. Exported so the private MCP runs the
- * same statement and both endpoints rank alike.
+ * pgvector text, $3 penalty, $4 limit, $5 the model the rows must be embedded
+ * with. Exported so the private MCP runs the same statement and both endpoints
+ * rank alike.
+ *
+ * The model filter is in this statement, not only in the check before it: each
+ * statement reads its own snapshot, so a migration that commits between the two
+ * would otherwise rank rows of the new model against a query of the old one.
  */
 export const SEARCH_SQL = `
   with scored as (
-    select id, source, title, heading, url, text, lang, tokens_est, test,
-      1 - (embedding <=> $2::vector) - case when test then $3::float8 else 0 end as score
-    from chunks
-    where modality = $1
+    select c.id, c.source, c.title, c.heading, c.url, c.text, c.lang, c.tokens_est, c.test,
+      1 - (c.embedding <=> $2::vector) - case when c.test then $3::float8 else 0 end as score
+    from chunks c join shards s on s.shard = c.shard
+    where c.modality = $1 and s.model = $5
   )
   select * from scored where score >= 0 order by score desc, id limit $4`;
 
@@ -81,6 +86,10 @@ export async function modalities(db: Connection): Promise<Set<Modality>> {
  * from another model with the same dimension would otherwise rank against the
  * wrong space and return confident, wrong neighbours. The check reads the same
  * row as the dimension check, so it costs no extra query.
+ *
+ * The ranking reads only rows of the model the check saw. If a model migration
+ * commits between the check and the ranking, the result is empty for that one
+ * query, not neighbours from the other model.
  */
 export async function search(
   db: Connection,
@@ -99,7 +108,7 @@ export async function search(
   if (queryVector.length !== embedded.dim) {
     throw new Error(`a ${queryVector.length}-dim query against ${modality} rows embedded at ${embedded.dim} (${embedded.model})`);
   }
-  const { rows } = await db.query<ChunkRow & { score: number }>(SEARCH_SQL, [modality, `[${queryVector.join(',')}]`, TEST_SCORE_PENALTY, topK]);
+  const { rows } = await db.query<ChunkRow & { score: number }>(SEARCH_SQL, [modality, `[${queryVector.join(',')}]`, TEST_SCORE_PENALTY, topK, embedded.model]);
   return rows.map(({ score, ...row }) => ({ chunk: toChunk(row), score }));
 }
 
