@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { embedChunks, contentHash, mockProvider, embedText, loadCache, saveCache, selfHostedProvider } from './embed.js';
+import { embedChunks, contentHash, fetchWithRetry, mockProvider, embedText, loadCache, saveCache, selfHostedProvider } from './embed.js';
 
 describe('embedText', () => {
   it('prepends the page title and section heading to the body', () => {
@@ -236,5 +236,51 @@ describe('selfHostedProvider extras', () => {
     await expect(selfHostedProvider({ url: 'u', model: 'm', dim: 1 }).embed(['a', 'b'])).rejects.toThrow(/non-contiguous/);
     vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => ({ oops: true }) }));
     await expect(selfHostedProvider({ url: 'u', model: 'm', dim: 1 }).embed(['a'])).rejects.toThrow(/no data array/);
+  });
+});
+
+describe('fetchWithRetry', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Answers each call with the next status in `statuses`, or throws for 'throw'.
+  function stub(statuses: (number | 'throw')[], headers: Record<string, string> = {}) {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      const s = statuses[Math.min(calls++, statuses.length - 1)]!;
+      if (s === 'throw') throw new TypeError('fetch failed');
+      return new Response(s === 200 ? '{}' : 'busy', { status: s, headers });
+    });
+    return () => calls;
+  }
+  const waits: number[] = [];
+  const sleep = async (ms: number) => void waits.push(ms);
+  beforeEach(() => waits.splice(0));
+
+  it('retries a rate limit and a server error with growing waits, then returns the success', async () => {
+    const calls = stub([429, 503, 200]);
+    const res = await fetchWithRetry('https://x', {}, { sleep });
+    expect(res.status).toBe(200);
+    expect(calls()).toBe(3);
+    expect(waits).toEqual([1_000, 2_000]);
+  });
+
+  it('retries a request that throws', async () => {
+    stub(['throw', 200]);
+    expect((await fetchWithRetry('https://x', {}, { sleep })).status).toBe(200);
+  });
+
+  it('waits as long as Retry-After asks, up to a minute', async () => {
+    stub([429, 200], { 'retry-after': '120' });
+    await fetchWithRetry('https://x', {}, { sleep });
+    expect(waits).toEqual([60_000]);
+  });
+
+  it('does not retry a client error, and returns the last response after the final retry', async () => {
+    const calls = stub([400]);
+    expect((await fetchWithRetry('https://x', {}, { sleep })).status).toBe(400);
+    expect(calls()).toBe(1);
+    const calls2 = stub([500]);
+    expect((await fetchWithRetry('https://x', {}, { sleep, delaysMs: [1, 1] })).status).toBe(500);
+    expect(calls2()).toBe(3);
   });
 });

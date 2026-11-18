@@ -24,7 +24,7 @@ The steps are separate, so a producer can skip any of them. A producer that alre
 Pin it as a git dependency at a release tag:
 
 ```
-"@nymproject/retrieval-indexer": "github:nymtech/retrieval-indexer#v0.2.0"
+"@nymproject/retrieval-indexer": "github:nymtech/retrieval-indexer#v0.2.1"
 ```
 
 The package ships TypeScript and builds `dist/` on install (`prepare`), so a git install gets JavaScript. The consumer's `pnpm-workspace.yaml` must set two things. Approve this package's own `prepare` build, or pnpm installs it without `dist/`. Tell pnpm not to run the tree-sitter grammars' native build scripts, because the code-chunker loads each grammar as prebuilt WebAssembly, not a native addon:

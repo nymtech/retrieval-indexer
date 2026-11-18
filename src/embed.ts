@@ -66,6 +66,38 @@ export function contentHash(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
 
+// A rate limit (429), a server error (5xx) or a dropped connection is usually
+// gone seconds later. Without a retry, one of them fails a run that has already
+// paid for most of its embeddings, and the next run pays for them again.
+const RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
+const MAX_RETRY_AFTER_MS = 60_000;
+
+/**
+ * `fetch`, retried with backoff on a 429, a 5xx, or a request that throws. A
+ * `Retry-After` header in seconds sets the wait, up to a minute. Any other
+ * response, and the last one after the final retry, is returned for the caller
+ * to check.
+ */
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  { delaysMs = RETRY_DELAYS_MS, sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) }: { delaysMs?: number[]; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch (error) {
+      if (attempt >= delaysMs.length) throw error;
+      await sleep(delaysMs[attempt]!);
+      continue;
+    }
+    if (res.ok || !(res.status === 429 || res.status >= 500) || attempt >= delaysMs.length) return res;
+    const retryAfter = Number(res.headers.get('retry-after'));
+    await sleep(retryAfter > 0 ? Math.min(retryAfter * 1000, MAX_RETRY_AFTER_MS) : delaysMs[attempt]!);
+  }
+}
+
 /**
  * Voyage provider (default). voyage-3-large returns unit-normalised 1024-dim
  * vectors and retrieves noticeably better than the older voyage-3. Uses
@@ -82,7 +114,7 @@ export function voyageProvider({ apiKey, model = 'voyage-3-large', dim = 1024 }:
     model,
     dim,
     async embed(texts, inputType = 'document') {
-      const res = await fetch('https://api.voyageai.com/v1/embeddings', {
+      const res = await fetchWithRetry('https://api.voyageai.com/v1/embeddings', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -122,7 +154,7 @@ export function selfHostedProvider(
     dim,
     async embed(texts, inputType = 'document') {
       const input = inputType === 'query' && queryInstruction ? texts.map((t) => `${queryInstruction}${t}`) : texts;
-      const res = await fetch(url, {
+      const res = await fetchWithRetry(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
         body: JSON.stringify({ input, model }),
