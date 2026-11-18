@@ -6,11 +6,13 @@
 
 The pipeline is a set of small, composable modules:
 
-1. **Walk** a producer's source roots, skipping build output and dependencies, with a fail-closed gate that records any language it drops rather than dropping it silently (`walk`).
+1. **Walk** a producer's source roots, skipping build output and dependencies, with a fail-closed gate that records any language it drops rather than dropping it silently (`walk`). For a repository with no docs site, the same module reads its Markdown files as pages for the docs chunker (`collectMarkdownPages`).
 2. **Chunk** Markdown or MDX by heading (`chunker`, `mdx`) and source code at tree-sitter item boundaries (`code-chunker`, `items`), so each chunk is a retrieval-sized unit with a deep link.
 3. **Embed** the chunks with a pluggable provider and a content-hash cache, so a rebuild re-embeds only what changed (`embed`).
 4. **Store** the embedded chunks in Postgres + pgvector, one transaction per run, keeping unchanged vectors and deleting stale rows (`store`).
 5. **Search** the store at query time with cosine similarity, returning the same chunk shape a bundled-index search would (`search`).
+
+The steps are separate, so a producer can skip any of them. A producer that already has its own units, for example one record per docs section from another tool, can build its own `Chunk[]` and pass it to `indexShard`, which embeds and stores it.
 
 ## Requirements
 
@@ -22,7 +24,7 @@ The pipeline is a set of small, composable modules:
 Pin it as a git dependency at a release tag:
 
 ```
-"@nymproject/retrieval-indexer": "github:nymtech/retrieval-indexer#v0.1.3"
+"@nymproject/retrieval-indexer": "github:nymtech/retrieval-indexer#v0.2.0"
 ```
 
 The package ships TypeScript and builds `dist/` on install (`prepare`), so a git install gets JavaScript. The consumer's `pnpm-workspace.yaml` must set two things. Approve this package's own `prepare` build, or pnpm installs it without `dist/`. Tell pnpm not to run the tree-sitter grammars' native build scripts, because the code-chunker loads each grammar as prebuilt WebAssembly, not a native addon:
@@ -43,7 +45,7 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 
 | Import | Role |
 |---|---|
-| `@nymproject/retrieval-indexer/walk` | source walk, file-size cap, fail-closed language gate |
+| `@nymproject/retrieval-indexer/walk` | source walk, file-size cap, fail-closed language gate, Markdown walk |
 | `@nymproject/retrieval-indexer/chunker` | Markdown docs chunker (heading-scoped, deep links) |
 | `@nymproject/retrieval-indexer/mdx` | MDX to plain text: frontmatter, partials, fence-aware strip |
 | `@nymproject/retrieval-indexer/code-chunker` | code chunker at tree-sitter item boundaries, test-code flag |

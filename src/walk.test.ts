@@ -2,7 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { assertNoSilentDrops, assertRootsYieldChunks, collectSourceFiles } from './walk.js';
+import { chunkPages } from './chunker.js';
+import { assertNoSilentDrops, assertRootsYieldChunks, collectMarkdownPages, collectSourceFiles } from './walk.js';
 
 describe('collectSourceFiles', () => {
   it('keeps chunkable files under the roots and skips excludes, oversized files, and missing roots', () => {
@@ -51,5 +52,40 @@ describe('assertRootsYieldChunks', () => {
 
   it('does not count a sibling with a shared prefix as under the root', () => {
     expect(() => assertRootsYieldChunks(['a'], files, ['ab/lib.rs'])).toThrow(/: a$/);
+  });
+});
+
+describe('collectMarkdownPages', () => {
+  const github = 'https://github.com/org/repo/blob/main';
+
+  it('keeps Markdown files under the roots, titled by the first heading, and skips the excluded and empty ones', () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'walk-md-'));
+    afterAll(() => fs.rmSync(repo, { recursive: true, force: true }));
+    const write = (rel: string, text: string) => {
+      fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true });
+      fs.writeFileSync(path.join(repo, rel), text);
+    };
+    write('README.md', '# The app\n\nIt connects.');
+    write('core/docs/no-title.md', 'Plain text.');
+    write('core/docs/empty.md', '  \n');
+    write('core/CHANGELOG.md', '# Changes');
+    write('core/node_modules/dep/README.md', '# A dependency');
+    write('.github/pull_request_template.md', '# Template');
+    write('.nym-codex/snippets/a.md', '# A snippet');
+    write('core/src/lib.rs', 'pub fn a() {}');
+
+    const pages = collectMarkdownPages(repo, ['.'], { source: 'repo-docs', github });
+
+    expect(pages.map((p) => [p.url, p.title]).sort()).toEqual([
+      [`${github}/README.md`, 'The app'],
+      [`${github}/core/docs/no-title.md`, 'core/docs/no-title.md'],
+    ]);
+    expect(pages.every((p) => p.source === 'repo-docs')).toBe(true);
+  });
+
+  it('gives chunk ids of the repo name, the file path and the heading anchor', () => {
+    const page = { source: 'repo-docs', title: 'The app', url: `${github}/README.md`, body: '# The app\n\n## Build it\n\n' + 'Run make. '.repeat(20) };
+    const ids = chunkPages([page], { siteUrl: github, repo: 'repo' }).map((c) => c.id);
+    expect(ids).toContain('repo/README.md#build-it');
   });
 });

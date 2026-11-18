@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { langOf } from './code-chunker.js';
+import type { PageRecord } from './types.js';
 
 export const DEFAULT_EXCLUDE =
   /(^|\/)(node_modules|target|dist|build|out|\.next|pkg|coverage|__pycache__)(\/|$)|\.d\.[cm]?ts$/;
@@ -99,4 +100,48 @@ export function assertRootsYieldChunks(roots: string[], files: SourceFile[], chu
   const under = (p: string, root: string) => p === root || p.startsWith(`${root}/`);
   const empty = roots.filter((root) => files.some((f) => under(f.path, root)) && !chunkPaths.some((p) => under(p, root)));
   if (empty.length) throw new Error(`these roots hold source files but produced no chunks: ${empty.join(', ')}`);
+}
+
+// Files a Markdown walk skips: process and agent files carry no product
+// knowledge (SECURITY.md and CONTRIBUTING.md are kept: the first is
+// threat-relevant, the second often holds build and architecture detail), and
+// .nym-codex holds snippet files that their own pages already index.
+export const DOCS_EXCLUDE = /(^|\/)(CHANGELOG|CODE_OF_CONDUCT|CLAUDE|AGENTS)\.md$|(^|\/)(\.github|\.nym-codex)(\/|$)/i;
+
+/**
+ * The `.md` files under `roots` as pages for `chunkPages`, for a producer with no
+ * docs site of its own. The title is the first `# ` heading, or the path when
+ * there is none, and the url is the file's GitHub link under `github`
+ * (`https://github.com/<org>/<repo>/blob/<ref>`). Pass that same `github` as
+ * `siteUrl` to `chunkPages`, so a chunk id is the repo-relative path plus the
+ * heading anchor. Empty files are skipped.
+ */
+export function collectMarkdownPages(
+  repoRoot: string,
+  roots: string[],
+  { source, github, exclude = DOCS_EXCLUDE }: { source: string; github: string; exclude?: RegExp },
+): PageRecord[] {
+  const pages: PageRecord[] = [];
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // root may not exist on every checkout
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      const rel = path.relative(repoRoot, full).split(path.sep).join('/');
+      if (DEFAULT_EXCLUDE.test(rel) || exclude.test(rel)) continue;
+      if (e.isDirectory()) walk(full);
+      else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+        const body = fs.readFileSync(full, 'utf-8');
+        if (!body.trim()) continue;
+        const h1 = body.match(/^#\s+(.+)$/m);
+        pages.push({ source, title: h1 ? h1[1]!.trim() : rel, url: `${github}/${rel}`, body });
+      }
+    }
+  };
+  for (const root of roots) walk(path.join(repoRoot, root));
+  return pages;
 }
