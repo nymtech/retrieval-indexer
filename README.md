@@ -71,12 +71,11 @@ Index and query must use the same model; the store records the model per modalit
 import { Client } from 'pg';
 import { chunkCodeFile } from '@nymproject/retrieval-indexer/code-chunker';
 import { voyageProvider, embedQuery } from '@nymproject/retrieval-indexer/embed';
-import { ensureSchema, indexShard } from '@nymproject/retrieval-indexer/store';
+import { indexShard } from '@nymproject/retrieval-indexer/store';
 import { search } from '@nymproject/retrieval-indexer/search';
 
 const db = new Client({ connectionString: process.env.DATABASE_URL });
 await db.connect();
-await ensureSchema(db);
 
 const provider = voyageProvider({ apiKey: process.env.VOYAGE_API_KEY! });
 
@@ -91,7 +90,27 @@ const queryVector = await embedQuery('how do I open a connection', provider);
 const hits = await search(db, 'code', queryVector, { topK: 6 });
 ```
 
-Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
+The example needs a migrated store (see [Schema and migrations](#schema-and-migrations)). Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
+
+## Schema and migrations
+
+The schema is the SQL files in `migrations/`, applied in file order. [node-pg-migrate](https://github.com/salsita/node-pg-migrate) applies them to a shared store and records each applied file in the store's `pgmigrations` table, so a later run applies only the new files.
+
+To migrate a shared store, run the `store-migrate` workflow (Actions, then "Run workflow"). Give it a GitHub Environment that holds `PG_URL` (the owner role, at the direct Postgres address, not a PgBouncer pooler) and, optionally, `PG_CA_CERT`. Run it with `dry_run` first to list the pending files. From a machine with access to the database:
+
+```
+DATABASE_URL=postgres://... pnpm migrate up --dry-run
+DATABASE_URL=postgres://... pnpm migrate up
+```
+
+`ensureSchema(db)` applies the same files to a PGlite or throwaway local store, which is what the tests use. It records nothing, so do not use it on a shared store.
+
+Rules for a new migration:
+
+- Name it with the next number, for example `0002_edges.sql`, and put its statements under `-- Up Migration`.
+- End each statement with a semicolon at the end of a line. `ensureSchema` splits on that, because PGlite runs one statement per query.
+- If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it.
+- Once a file is applied to a store, do not change it. Write a new file.
 
 ## Develop
 

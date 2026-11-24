@@ -23,6 +23,16 @@ afterEach(() => db.close());
 
 const rows = async () => (await db.query<{ id: string; url: string; test: boolean }>('select id, url, test from chunks order by id')).rows;
 
+describe('ensureSchema', () => {
+  it('applies the migrations: two tables, their keys and two indexes, and a second run changes nothing', async () => {
+    await ensureSchema(db);
+    const tables = await db.query<{ name: string }>("select tablename as name from pg_tables where schemaname = 'public' order by 1");
+    const indexes = await db.query<{ name: string }>("select indexname as name from pg_indexes where schemaname = 'public' order by 1");
+    expect(tables.rows.map((row) => row.name)).toEqual(['chunks', 'shards']);
+    expect(indexes.rows.map((row) => row.name)).toEqual(['chunks_modality', 'chunks_pkey', 'chunks_shard', 'shards_pkey']);
+  });
+});
+
 describe('indexShard', () => {
   it('embeds a new shard, then skips unchanged rows, re-embeds a changed one, and deletes a removed one', async () => {
     const first = countingProvider();
