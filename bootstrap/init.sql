@@ -25,3 +25,22 @@ ALTER ROLE retrieval_ddl IN DATABASE codex SET search_path = public;
 -- 7. Recovery path: lets avnadmin act as retrieval_ddl and reassign
 --    its objects later (needed explicitly on PG 16+)
 GRANT retrieval_ddl TO avnadmin WITH INHERIT TRUE, SET TRUE;
+
+-- 8. Application roles
+CREATE ROLE retrieval_writer WITH LOGIN PASSWORD 'change_me_writer'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE retrieval_reader WITH LOGIN PASSWORD 'change_me_reader'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+
+GRANT CONNECT ON DATABASE codex TO retrieval_writer, retrieval_reader;
+GRANT USAGE ON SCHEMA public TO retrieval_writer, retrieval_reader;
+
+ALTER ROLE retrieval_reader IN DATABASE codex SET statement_timeout = '5s';
+
+-- 9. Baseline privileges on every table retrieval_ddl creates from now on
+ALTER DEFAULT PRIVILEGES FOR ROLE retrieval_ddl IN SCHEMA public
+  GRANT SELECT ON TABLES TO retrieval_reader;
+ALTER DEFAULT PRIVILEGES FOR ROLE retrieval_ddl IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE ON TABLES TO retrieval_writer;
+ALTER DEFAULT PRIVILEGES FOR ROLE retrieval_ddl IN SCHEMA public
+  GRANT USAGE ON SEQUENCES TO retrieval_writer;
