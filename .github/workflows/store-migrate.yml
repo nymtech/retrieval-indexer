@@ -1,0 +1,110 @@
+name: store-migrate
+
+# On-demand migration runner for a retrieval store. Applies the pending SQL
+# migrations in `migrations/` to a target Postgres with node-pg-migrate, which
+# records each applied file in its `pgmigrations` table. The same runner as
+# nymtech/websites `vpn-api-postgres-migrate`.
+#
+# Dispatch only: it never runs on push or on a pull request. The connection
+# comes from the selected GitHub Environment's secrets, so a run can need a
+# reviewer, and each store keeps its own credentials:
+#   PG_URL      required. Connection string for the owner role, to the direct
+#               Postgres address, not the PgBouncer pooler: node-pg-migrate
+#               holds a session advisory lock, which transaction pooling breaks.
+#               It holds the password, so keep it a secret.
+#   PG_CA_CERT  optional. The CA certificate contents (PEM). When set, it is
+#               written to a file and added to the connection as `sslrootcert`
+#               (with `sslmode=verify-full` when the URL sets none).
+#
+# A dry run applies no migration, but it still takes node-pg-migrate's lock, and
+# on a store that was never migrated it creates the empty `pgmigrations` table.
+#
+# A migration that adds a table names the grants the writer and reader roles
+# need. Run those grants after this workflow (MCP-STORE-SETUP.md, step 3).
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub Environment to read PG_URL and PG_CA_CERT from, e.g. \"retrieval-store\". Must match the Environment name exactly."
+        type: string
+        required: true
+      dry_run:
+        description: "List the pending migrations without applying them. It still takes the lock, and creates the empty pgmigrations table on a store that has none."
+        type: boolean
+        required: false
+        default: false
+
+# Never run two migrations against one store at once, and never cancel one that
+# is applying.
+concurrency:
+  group: store-migrate-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build DATABASE_URL (add the optional CA certificate)
+        env:
+          PG_URL: ${{ secrets.PG_URL }}
+          PG_CA_CERT: ${{ secrets.PG_CA_CERT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PG_URL:-}" ]; then
+            echo "::error::PG_URL secret is not set for environment '${{ inputs.environment }}'." >&2
+            exit 1
+          fi
+          DB_URL="$PG_URL"
+          if [ -n "${PG_CA_CERT:-}" ]; then
+            CA_FILE="$RUNNER_TEMP/pg-ca.pem"
+            printf '%s\n' "$PG_CA_CERT" > "$CA_FILE"
+            case "$DB_URL" in *\?*) SEP='&' ;; *) SEP='?' ;; esac
+            DB_URL="${DB_URL}${SEP}sslrootcert=${CA_FILE}"
+            case "$DB_URL" in *sslmode=*) : ;; *) DB_URL="${DB_URL}&sslmode=verify-full" ;; esac
+            echo "TLS: verifying the server against the supplied CA."
+          else
+            echo "TLS: no PG_CA_CERT supplied; using the connection string as given."
+          fi
+          # The URL holds the password: mask it before it can reach a log line.
+          echo "::add-mask::$DB_URL"
+          echo "DATABASE_URL=$DB_URL" >> "$GITHUB_ENV"
+
+      - name: Run migrations
+        run: |
+          set -euo pipefail
+          echo "Applying migrations to environment '${{ inputs.environment }}' (dry_run=${{ inputs.dry_run }})."
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            OUT="$RUNNER_TEMP/migrate-dry-run.log"
+            pnpm exec node-pg-migrate up -m migrations -j sql --dry-run 2>&1 | tee "$OUT"
+            # node-pg-migrate prints "dry run" only when it parsed the flag.
+            # Without that line the run was not a preview and may have applied changes.
+            if ! grep -qx 'dry run' "$OUT"; then
+              echo "::error::node-pg-migrate did not report 'dry run'; the flag was not applied." >&2
+              exit 1
+            fi
+          else
+            pnpm exec node-pg-migrate up -m migrations -j sql
+          fi

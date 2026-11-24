@@ -10,6 +10,7 @@
 // ids; any producer sharing a store sets `repo` on chunkCodeFile so its ids
 // cannot collide with another producer's.
 
+import { readdir, readFile } from 'node:fs/promises';
 import { chunkHash, embedChunks, type EmbedProvider, type Embeddable } from './embed.js';
 
 /**
@@ -41,41 +42,42 @@ export interface ShardStats {
   deleted: number;
 }
 
-// `embedding` has no fixed dimension, so a store's model can change; a typed
-// column matters only if an ANN index is ever added.
-export const SCHEMA = [
-  'create extension if not exists vector',
-  `create table if not exists shards (
-    shard text primary key,
-    repo text not null,
-    modality text not null,
-    model text not null,
-    dim integer not null,
-    source_rev text,
-    last_run timestamptz not null
-  )`,
-  `create table if not exists chunks (
-    id text primary key,
-    shard text not null references shards (shard) on delete cascade,
-    repo text not null,
-    modality text not null,
-    source text not null,
-    title text not null,
-    heading text not null,
-    url text not null,
-    text text not null,
-    lang text,
-    tokens_est integer,
-    test boolean not null default false,
-    content_hash text not null,
-    embedding vector not null
-  )`,
-  'create index if not exists chunks_shard on chunks (shard)',
-  'create index if not exists chunks_modality on chunks (modality)',
-];
+const MIGRATIONS = new URL('../migrations/', import.meta.url);
 
+/**
+ * Apply the up section of every migration, in file order, to a PGlite or
+ * throwaway local store. It records nothing, so a shared store uses
+ * node-pg-migrate (`pnpm migrate up`) instead: once a migration is not
+ * idempotent, a second ensureSchema run fails or changes data.
+ */
 export async function ensureSchema(db: Connection): Promise<void> {
-  for (const statement of SCHEMA) await db.query(statement);
+  const files = (await readdir(MIGRATIONS)).sort();
+  for (const file of files) {
+    // node-pg-migrate loads any other file as a JavaScript migration and fails.
+    if (!file.endsWith('.sql')) throw new Error(`migrations/${file} is not a .sql file`);
+    for (const statement of upStatements(file, await readFile(new URL(file, MIGRATIONS), 'utf8'))) {
+      await db.query(statement);
+    }
+  }
+}
+
+// The section markers match as node-pg-migrate matches them (getActions in its
+// sqlMigration.js): any case, any run of dashes and spaces after `--`.
+const marker = (direction: 'up' | 'down') => new RegExp(`^\\s*--[\\s-]*${direction}\\s+migration`, 'im');
+
+// PGlite's query takes one statement, so the up section is split on a semicolon
+// at a line end. A function body ($$ ... $$) with such a semicolon would break
+// this; no migration has one. A file with no up marker throws here, where
+// node-pg-migrate would run the whole file as its up section.
+function upStatements(file: string, sql: string): string[] {
+  const start = sql.search(marker('up'));
+  if (start < 0) throw new Error(`migrations/${file} has no "-- Up Migration" marker`);
+  const end = sql.search(marker('down'));
+  return sql
+    .slice(start, end > start ? end : undefined)
+    .split(/;\s*$/m)
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.replace(/^--.*$/gm, '').trim() !== '');
 }
 
 // Rows per write statement. Each row carries its vector as text (about 12 KB at

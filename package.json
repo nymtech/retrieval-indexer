@@ -1,6 +1,6 @@
 {
   "name": "@nymproject/retrieval-indexer",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Chunks, embeds, and indexes docs and source code into a Postgres + pgvector retrieval store",
   "license": "Apache-2.0",
   "private": true,
@@ -10,7 +10,8 @@
     "url": "git+https://github.com/nymtech/retrieval-indexer.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "migrations"
   ],
   "exports": {
     "./chunker": {
@@ -54,7 +55,8 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate": "node-pg-migrate -m migrations -j sql"
   },
   "dependencies": {
     "github-slugger": "^2.0.0",
@@ -71,6 +73,7 @@
     "@electric-sql/pglite": "^0.3.0",
     "@types/node": "24.19.2",
     "@types/pg": "^8.23.1",
+    "node-pg-migrate": "^7.9.0",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
   },
