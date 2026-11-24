@@ -16,6 +16,9 @@ name: store-migrate
 #               written to a file and added to the connection as `sslrootcert`
 #               (with `sslmode=verify-full` when the URL sets none).
 #
+# A dry run applies no migration, but it still takes node-pg-migrate's lock, and
+# on a store that was never migrated it creates the empty `pgmigrations` table.
+#
 # A migration that adds a table names the grants the writer and reader roles
 # need. Run those grants after this workflow (MCP-STORE-SETUP.md, step 3).
 
@@ -27,7 +30,7 @@ on:
         type: string
         required: true
       dry_run:
-        description: "List the pending migrations without applying them."
+        description: "List the pending migrations without applying them. It still takes the lock, and creates the empty pgmigrations table on a store that has none."
         type: boolean
         required: false
         default: false
@@ -59,7 +62,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.13.1
+          version: 10.30.2
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

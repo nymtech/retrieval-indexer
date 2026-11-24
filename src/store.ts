@@ -51,21 +51,30 @@ const MIGRATIONS = new URL('../migrations/', import.meta.url);
  * idempotent, a second ensureSchema run fails or changes data.
  */
 export async function ensureSchema(db: Connection): Promise<void> {
-  const files = (await readdir(MIGRATIONS)).filter((name) => name.endsWith('.sql')).sort();
+  const files = (await readdir(MIGRATIONS)).sort();
   for (const file of files) {
+    // node-pg-migrate loads any other file as a JavaScript migration and fails.
+    if (!file.endsWith('.sql')) throw new Error(`migrations/${file} is not a .sql file`);
     for (const statement of upStatements(file, await readFile(new URL(file, MIGRATIONS), 'utf8'))) {
       await db.query(statement);
     }
   }
 }
 
+// The section markers match as node-pg-migrate matches them (getActions in its
+// sqlMigration.js): any case, any run of dashes and spaces after `--`.
+const marker = (direction: 'up' | 'down') => new RegExp(`^\\s*--[\\s-]*${direction}\\s+migration`, 'im');
+
 // PGlite's query takes one statement, so the up section is split on a semicolon
 // at a line end. A function body ($$ ... $$) with such a semicolon would break
-// this; no migration has one.
+// this; no migration has one. A file with no up marker throws here, where
+// node-pg-migrate would run the whole file as its up section.
 function upStatements(file: string, sql: string): string[] {
-  const up = sql.split('-- Up Migration')[1]?.split('-- Down Migration')[0];
-  if (up === undefined) throw new Error(`${file} has no "-- Up Migration" marker`);
-  return up
+  const start = sql.search(marker('up'));
+  if (start < 0) throw new Error(`migrations/${file} has no "-- Up Migration" marker`);
+  const end = sql.search(marker('down'));
+  return sql
+    .slice(start, end > start ? end : undefined)
     .split(/;\s*$/m)
     .map((statement) => statement.trim())
     .filter((statement) => statement.replace(/^--.*$/gm, '').trim() !== '');

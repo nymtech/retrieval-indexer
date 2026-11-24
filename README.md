@@ -96,18 +96,22 @@ The example needs a migrated store (see [Schema and migrations](#schema-and-migr
 
 The schema is the SQL files in `migrations/`, applied in file order. [node-pg-migrate](https://github.com/salsita/node-pg-migrate) applies them to a shared store and records each applied file in the store's `pgmigrations` table, so a later run applies only the new files.
 
-To migrate a shared store, run the `store-migrate` workflow (Actions, then "Run workflow"). Give it a GitHub Environment that holds `PG_URL` (the owner role, at the direct Postgres address, not a PgBouncer pooler) and, optionally, `PG_CA_CERT`. Run it with `dry_run` first to list the pending files. From a machine with access to the database:
+To migrate a shared store, run the `store-migrate` workflow (Actions, then "Run workflow"). Give it a GitHub Environment that holds `PG_URL` (the owner role, at the direct Postgres address, not a PgBouncer pooler) and, optionally, `PG_CA_CERT`. Run it with `dry_run` first to list the pending files. A dry run applies no migration, but it still takes node-pg-migrate's lock, and on a store that was never migrated it creates the empty `pgmigrations` table. From a machine with access to the database:
 
 ```
 DATABASE_URL=postgres://... pnpm migrate up --dry-run
 DATABASE_URL=postgres://... pnpm migrate up
 ```
 
+Each run logs `Can't determine timestamp for 0001`. node-pg-migrate expects a timestamp prefix, and when it finds a plain number it logs this line and orders the files by that number. Nothing is wrong.
+
 `ensureSchema(db)` applies the same files to a PGlite or throwaway local store, which is what the tests use. It records nothing, so do not use it on a shared store.
 
 Rules for a new migration:
 
-- Name it with the next number, for example `0002_edges.sql`, and put its statements under `-- Up Migration`.
+- Write the file by hand and name it with the next four-digit number, for example `0002_edges.sql`. Do not use `pnpm migrate create`: it names the file with a timestamp, which sorts after every numbered file, so node-pg-migrate refuses to apply a numbered file written after it.
+- Put its statements under `-- Up Migration`.
+- Put only `.sql` files in `migrations/`. node-pg-migrate loads any other file as a JavaScript migration, and `ensureSchema` throws on it.
 - End each statement with a semicolon at the end of a line. `ensureSchema` splits on that, because PGlite runs one statement per query.
 - If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it.
 - Once a file is applied to a store, do not change it. Write a new file.
