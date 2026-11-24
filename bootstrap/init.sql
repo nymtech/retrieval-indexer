@@ -32,6 +32,8 @@ CREATE ROLE retrieval_writer WITH LOGIN PASSWORD 'change_me_writer'
 CREATE ROLE retrieval_reader WITH LOGIN PASSWORD 'change_me_reader'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
 
+ALTER ROLE retrieval_reader CONNECTION LIMIT 20;
+
 GRANT CONNECT ON DATABASE codex TO retrieval_writer, retrieval_reader;
 GRANT USAGE ON SCHEMA public TO retrieval_writer, retrieval_reader;
 
