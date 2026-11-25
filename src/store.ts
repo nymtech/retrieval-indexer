@@ -50,14 +50,9 @@ export interface StoreConnectionConfig {
 const URL_TLS = /[?&](sslmode|sslrootcert|sslcert|sslkey)=/i;
 
 /**
- * pg connection options for a store URL and the PEM text of the CA that signed
- * the server's certificate. A managed Postgres often uses its own CA, which CI
- * runners and serverless hosts do not trust and have no file for. With a CA,
- * pg checks the chain and the host name, as `sslmode=verify-full` does.
- *
- * pg lets TLS settings in the URL replace the `ssl` option, so a URL that comes
- * with a CA must not set them. Without a CA the URL must set `sslmode` (for
- * example `disable` for a local store), so that a missing CA cannot turn TLS off.
+ * pg connection options for a store. With `ca` (PEM text), pg verifies the
+ * server's chain and host name, and the URL must not set TLS parameters, which
+ * pg applies over `ca`. Without `ca`, the URL must set `sslmode`.
  */
 export function storeConnection(url: string, ca?: string): StoreConnectionConfig {
   if (!ca) {
@@ -66,7 +61,7 @@ export function storeConnection(url: string, ca?: string): StoreConnectionConfig
     }
     return { connectionString: url };
   }
-  // Node accepts any text as a CA without an error, and then trusts nothing.
+  // Node accepts text that is not a certificate as a CA without an error.
   if (!ca.includes('-----BEGIN CERTIFICATE-----')) {
     throw new Error('the store CA is not PEM text: it must contain -----BEGIN CERTIFICATE----- (do not encode it with base64)');
   }

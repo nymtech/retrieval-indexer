@@ -51,7 +51,7 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 | `@nymproject/retrieval-indexer/code-chunker` | code chunker at tree-sitter item boundaries, test-code flag |
 | `@nymproject/retrieval-indexer/items` | tree-sitter item finder for Rust, TS/JS, Go, Python |
 | `@nymproject/retrieval-indexer/embed` | embedding providers, content-hash cache, bounded-concurrency batching |
-| `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`), and `storeConnection` for TLS with a private CA |
+| `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`, `storeConnection`) |
 | `@nymproject/retrieval-indexer/search` | read side (`search`, `getSection`, `modalities`, `staleShards`); loads no parser |
 | `@nymproject/retrieval-indexer/types` | shared types |
 
@@ -92,7 +92,7 @@ const hits = await search(db, 'code', queryVector, { topK: 6 });
 
 The example needs a migrated store (see [Schema and migrations](#schema-and-migrations)).
 
-`storeConnection(url, ca)` returns the pg options for a store. A managed Postgres (Aiven, for example) signs its server certificate with its own CA, which CI runners and serverless hosts do not trust and have no file for, so pass the CA as PEM text and pg checks the chain and the host name. pg lets TLS settings in the URL replace that CA, so the URL must not set `sslmode` or `sslrootcert` when you pass one. Without a CA, the URL must set `sslmode` (`sslmode=disable` for a local store). `storeConnection` throws on a URL that breaks either rule, and on a CA that is not PEM text. Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
+`storeConnection(url, ca?)` returns the pg options for a store. For a store with a private CA, pass the CA as PEM text and leave `sslmode` and `sslrootcert` out of the URL. Without a CA, the URL must set `sslmode`, for example `sslmode=disable` for a local store. Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
 
 ## Schema and migrations
 
@@ -115,7 +115,7 @@ Rules for a new migration:
 - Put its statements under `-- Up Migration`.
 - Put only `.sql` files in `migrations/`. node-pg-migrate loads any other file as a JavaScript migration, and `ensureSchema` throws on it.
 - End each statement with a semicolon at the end of a line. `ensureSchema` splits on that, because PGlite runs one statement per query.
-- If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it. `bootstrap/init.sql` gives the reader `select` and the writer `select`, `insert` and `update` on each new table by default, so a table the writer deletes from needs an explicit `grant delete` (as `chunks` has).
+- If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it. By default (`bootstrap/init.sql`), a new table gives the reader `select` and the writer `select`, `insert` and `update`. Name any other grant, such as `delete`, in the file.
 - Once a file is applied to a store, do not change it. Write a new file.
 
 ## Develop

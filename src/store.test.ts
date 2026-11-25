@@ -146,7 +146,7 @@ describe('storeConnection', () => {
     expect(storeConnection(url, ca)).toEqual({ connectionString: url, ssl: { ca } });
   });
 
-  it('refuses TLS settings in the URL beside a CA, because pg would let them replace it', () => {
+  it('refuses TLS settings in the URL beside a CA', () => {
     expect(() => storeConnection(`${url}?sslmode=verify-full`, ca)).toThrow(/remove them from the URL/);
     expect(() => storeConnection(`${url}?application_name=x&sslrootcert=/ca.pem`, ca)).toThrow(/remove them from the URL/);
   });
@@ -161,7 +161,7 @@ describe('storeConnection', () => {
     expect(storeConnection(local, '')).toEqual({ connectionString: local });
   });
 
-  it('refuses a URL with neither a CA nor sslmode, so that a missing CA cannot turn TLS off', () => {
+  it('refuses a URL with neither a CA nor sslmode', () => {
     expect(() => storeConnection(url)).toThrow(/sets no sslmode/);
   });
 });
