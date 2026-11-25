@@ -42,6 +42,40 @@ export interface ShardStats {
   deleted: number;
 }
 
+export interface StoreConnectionConfig {
+  connectionString: string;
+  ssl?: { ca: string };
+}
+
+const URL_TLS = /[?&](sslmode|sslrootcert|sslcert|sslkey)=/i;
+
+/**
+ * pg connection options for a store URL and the PEM text of the CA that signed
+ * the server's certificate. A managed Postgres often uses its own CA, which CI
+ * runners and serverless hosts do not trust and have no file for. With a CA,
+ * pg checks the chain and the host name, as `sslmode=verify-full` does.
+ *
+ * pg lets TLS settings in the URL replace the `ssl` option, so a URL that comes
+ * with a CA must not set them. Without a CA the URL must set `sslmode` (for
+ * example `disable` for a local store), so that a missing CA cannot turn TLS off.
+ */
+export function storeConnection(url: string, ca?: string): StoreConnectionConfig {
+  if (!ca) {
+    if (!URL_TLS.test(url)) {
+      throw new Error('the store URL sets no sslmode and no CA was given: pass the CA, or add sslmode to the URL for a local store');
+    }
+    return { connectionString: url };
+  }
+  // Node accepts any text as a CA without an error, and then trusts nothing.
+  if (!ca.includes('-----BEGIN CERTIFICATE-----')) {
+    throw new Error('the store CA is not PEM text: it must contain -----BEGIN CERTIFICATE----- (do not encode it with base64)');
+  }
+  if (URL_TLS.test(url)) {
+    throw new Error('the store URL sets sslmode or sslrootcert, which would replace the CA: remove them from the URL');
+  }
+  return { connectionString: url, ssl: { ca } };
+}
+
 const MIGRATIONS = new URL('../migrations/', import.meta.url);
 
 /**

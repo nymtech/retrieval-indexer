@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { vector } from '@electric-sql/pglite/vector';
 import { mockProvider } from './embed.js';
-import { ensureSchema, indexShard, indexShards, type StoreChunk, type Connection } from './store.js';
+import { ensureSchema, indexShard, indexShards, storeConnection, type StoreChunk, type Connection } from './store.js';
 
 const chunk = (id: string, text: string, extra: Partial<StoreChunk> = {}): StoreChunk => ({
   id, source: 'nym-code', title: `src/${id}.rs`, heading: id, url: `https://g/src/${id}.rs#L1`, text, lang: 'rust', ...extra,
@@ -135,5 +135,33 @@ describe('connection guard', () => {
       indexShard(pool as unknown as Connection, { repo: 'nym', modality: 'code', chunks: [chunk('a', 'A')], provider: mockProvider({ dim: 4 }) }),
     ).rejects.toThrow(/not a pg\.Pool/);
     await pool.end();
+  });
+});
+
+describe('storeConnection', () => {
+  const url = 'postgresql://retrieval_reader:pw@db.example.com:21699/codex';
+  const ca = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
+
+  it('passes the CA as the ssl option', () => {
+    expect(storeConnection(url, ca)).toEqual({ connectionString: url, ssl: { ca } });
+  });
+
+  it('refuses TLS settings in the URL beside a CA, because pg would let them replace it', () => {
+    expect(() => storeConnection(`${url}?sslmode=verify-full`, ca)).toThrow(/remove them from the URL/);
+    expect(() => storeConnection(`${url}?application_name=x&sslrootcert=/ca.pem`, ca)).toThrow(/remove them from the URL/);
+  });
+
+  it('refuses a CA that is not PEM text, such as a base64-encoded file', () => {
+    expect(() => storeConnection(url, Buffer.from(ca).toString('base64'))).toThrow(/not PEM text/);
+  });
+
+  it('uses the URL as it is when there is no CA and the URL sets sslmode', () => {
+    const local = 'postgresql://u:pw@127.0.0.1:54329/retrieval?sslmode=disable';
+    expect(storeConnection(local)).toEqual({ connectionString: local });
+    expect(storeConnection(local, '')).toEqual({ connectionString: local });
+  });
+
+  it('refuses a URL with neither a CA nor sslmode, so that a missing CA cannot turn TLS off', () => {
+    expect(() => storeConnection(url)).toThrow(/sets no sslmode/);
   });
 });
