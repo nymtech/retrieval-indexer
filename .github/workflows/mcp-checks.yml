@@ -7,8 +7,9 @@ name: mcp-checks
 # pull-request run only checks, so a runner change must keep every probe file
 # passing.
 #
-# Each producer keeps its probe file beside its index roots. The repository
-# variable NYM_PROBES_REF picks the nym ref to read it from (default develop).
+# Each producer keeps its probe files beside its index roots (nym:
+# documentation/mcp-probes/). The repository variable NYM_PROBES_REF picks the
+# nym ref to read them from (default develop).
 #
 # Zulip secrets, all optional: ZULIP_SITE (https://<org>.zulipchat.com),
 # ZULIP_BOT_EMAIL, ZULIP_BOT_API_KEY, and ZULIP_ALERT_TO, a JSON list of user ids
@@ -39,7 +40,7 @@ concurrency:
 
 env:
   ENDPOINT: ${{ inputs.endpoint || 'https://nym.com/docs/api/mcp' }}
-  NYM_PROBES: https://raw.githubusercontent.com/nymtech/nym/${{ vars.NYM_PROBES_REF || 'develop' }}/documentation/mcp-probes.json
+  NYM_PROBES: https://raw.githubusercontent.com/nymtech/nym/${{ vars.NYM_PROBES_REF || 'develop' }}/documentation/mcp-probes
 
 jobs:
   check:
@@ -56,7 +57,7 @@ jobs:
       # The prepare script builds dist/.
       - run: pnpm install --frozen-lockfile
       - name: Run the probe files
-        run: node dist/checks-cli.js "$ENDPOINT" "$NYM_PROBES"
+        run: node dist/checks-cli.js "$ENDPOINT" "$NYM_PROBES/server.json" "$NYM_PROBES/retrieval.json"
 
   report:
     needs: check
