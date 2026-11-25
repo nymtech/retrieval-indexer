@@ -42,6 +42,35 @@ export interface ShardStats {
   deleted: number;
 }
 
+export interface StoreConnectionConfig {
+  connectionString: string;
+  ssl?: { ca: string };
+}
+
+const URL_TLS = /[?&](sslmode|sslrootcert|sslcert|sslkey)=/i;
+
+/**
+ * pg connection options for a store. With `ca` (PEM text), pg verifies the
+ * server's chain and host name, and the URL must not set TLS parameters, which
+ * pg applies over `ca`. Without `ca`, the URL must set `sslmode`.
+ */
+export function storeConnection(url: string, ca?: string): StoreConnectionConfig {
+  if (!ca) {
+    if (!URL_TLS.test(url)) {
+      throw new Error('the store URL sets no sslmode and no CA was given: pass the CA, or add sslmode to the URL for a local store');
+    }
+    return { connectionString: url };
+  }
+  // Node accepts text that is not a certificate as a CA without an error.
+  if (!ca.includes('-----BEGIN CERTIFICATE-----')) {
+    throw new Error('the store CA is not PEM text: it must contain -----BEGIN CERTIFICATE----- (do not encode it with base64)');
+  }
+  if (URL_TLS.test(url)) {
+    throw new Error('the store URL sets sslmode or sslrootcert, which would replace the CA: remove them from the URL');
+  }
+  return { connectionString: url, ssl: { ca } };
+}
+
 const MIGRATIONS = new URL('../migrations/', import.meta.url);
 
 /**

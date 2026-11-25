@@ -51,7 +51,7 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 | `@nymproject/retrieval-indexer/code-chunker` | code chunker at tree-sitter item boundaries, test-code flag |
 | `@nymproject/retrieval-indexer/items` | tree-sitter item finder for Rust, TS/JS, Go, Python |
 | `@nymproject/retrieval-indexer/embed` | embedding providers, content-hash cache, bounded-concurrency batching |
-| `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`) |
+| `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`, `storeConnection`) |
 | `@nymproject/retrieval-indexer/search` | read side (`search`, `getSection`, `modalities`, `staleShards`); loads no parser |
 | `@nymproject/retrieval-indexer/types` | shared types |
 
@@ -71,10 +71,10 @@ Index and query must use the same model; the store records the model per modalit
 import { Client } from 'pg';
 import { chunkCodeFile } from '@nymproject/retrieval-indexer/code-chunker';
 import { voyageProvider, embedQuery } from '@nymproject/retrieval-indexer/embed';
-import { indexShard } from '@nymproject/retrieval-indexer/store';
+import { indexShard, storeConnection } from '@nymproject/retrieval-indexer/store';
 import { search } from '@nymproject/retrieval-indexer/search';
 
-const db = new Client({ connectionString: process.env.DATABASE_URL });
+const db = new Client(storeConnection(process.env.DATABASE_URL!, process.env.DATABASE_CA_CERT));
 await db.connect();
 
 const provider = voyageProvider({ apiKey: process.env.VOYAGE_API_KEY! });
@@ -90,7 +90,9 @@ const queryVector = await embedQuery('how do I open a connection', provider);
 const hits = await search(db, 'code', queryVector, { topK: 6 });
 ```
 
-The example needs a migrated store (see [Schema and migrations](#schema-and-migrations)). Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
+The example needs a migrated store (see [Schema and migrations](#schema-and-migrations)).
+
+`storeConnection(url, ca?)` returns the pg options for a store. For a store with a private CA, pass the CA as PEM text and leave `sslmode` and `sslrootcert` out of the URL. Without a CA, the URL must set `sslmode`, for example `sslmode=disable` for a local store. Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
 
 ## Schema and migrations
 
@@ -113,7 +115,7 @@ Rules for a new migration:
 - Put its statements under `-- Up Migration`.
 - Put only `.sql` files in `migrations/`. node-pg-migrate loads any other file as a JavaScript migration, and `ensureSchema` throws on it.
 - End each statement with a semicolon at the end of a line. `ensureSchema` splits on that, because PGlite runs one statement per query.
-- If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it.
+- If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it. By default (`bootstrap/init.sql`), a new table gives the reader `select` and the writer `select`, `insert` and `update`. Name any other grant, such as `delete`, in the file.
 - Once a file is applied to a store, do not change it. Write a new file.
 
 ## Develop
