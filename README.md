@@ -54,6 +54,7 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 | `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`, `storeConnection`) |
 | `@nymproject/retrieval-indexer/search` | read side (`search`, `getSection`, `modalities`, `staleShards`); loads no parser |
 | `@nymproject/retrieval-indexer/types` | shared types |
+| `@nymproject/retrieval-indexer/checks` | probe-file runner for a deployed MCP endpoint (`runChecks`, `parseProbeFile`); CLI `retrieval-mcp-check` |
 
 ## Embedding providers
 
@@ -126,6 +127,38 @@ Rules for a new migration:
 - End each statement with a semicolon at the end of a line. `ensureSchema` splits on that, because PGlite runs one statement per query.
 - If it adds a table, say in the file which grants the writer and reader roles need. The person who runs the migration runs those grants after it. By default (`bootstrap/init.sql`), a new table gives the reader `select` and the writer `select`, `insert` and `update`. Name any other grant, such as `delete`, in the file.
 - Once a file is applied to a store, do not change it. Write a new file.
+
+## Check a deployed MCP endpoint
+
+`retrieval-mcp-check <mcp-url> <probe file or URL>...` runs probe files against a deployed MCP server and exits 1 when a check fails. A Vercel preview needs its bypass token in `$BYPASS`.
+
+Each producer keeps its probe file beside its index roots, so one pull request changes a root and its probe. A probe file (format version 1) is JSON:
+
+```json
+{
+  "version": 1,
+  "name": "nym",
+  "tools": ["get_section", "search_code", "search_docs"],
+  "probes": [
+    { "group": "Retrieval", "label": "finds the SOCKS5 setup", "tool": "search_docs", "args": { "query": "run a socks5 client" }, "match": "socks5|SOCKS5" },
+    { "group": "Index coverage", "label": "smolmix", "tool": "search_code", "args": { "query": "Tunnel new_with_ipr", "topK": 8 }, "path": { "repo": "nymtech/nym", "path": "smolmix" } }
+  ]
+}
+```
+
+| Field | Check |
+|---|---|
+| `tools` | `tools/list` returns exactly these names, and each description has 20 characters or more |
+| `match` | Each regex matches the tool's text |
+| `notMatch` | The regex does not match |
+| `isError` | The result is (or is not) an MCP error result |
+| `path` | A hit links to a file at or under `path` in `repo`: `github.com/<repo>/blob/<ref>/<path>/` |
+| `roundTrip` | `get_section` resolves the first anchored URL in the text |
+| `advisory` | A failure is a note and does not fail the run |
+
+A probe needs at least one of `match`, `notMatch`, `isError`, `path` or `roundTrip`. Each run also checks the transport once: a single `Accept` type is refused with 406, and `GET` with 405.
+
+The `mcp-checks` workflow runs every producer's probe file against `https://nym.com/docs/api/mcp` each day, on a dispatch, on a push to `main`, and on each pull request. It blocks no other repository. Outside pull requests, a failure opens or updates the issue "MCP checks failing", a pass closes it, and each change of state sends a Zulip direct message when the `ZULIP_*` secrets are set (see the workflow file).
 
 ## Develop
 

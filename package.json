@@ -1,6 +1,6 @@
 {
   "name": "@nymproject/retrieval-indexer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Chunks, embeds, and indexes docs and source code into a Postgres + pgvector retrieval store",
   "license": "Apache-2.0",
   "private": true,
@@ -21,6 +21,10 @@
     "./code-chunker": {
       "types": "./dist/code-chunker.d.ts",
       "default": "./dist/code-chunker.js"
+    },
+    "./checks": {
+      "types": "./dist/checks.d.ts",
+      "default": "./dist/checks.js"
     },
     "./embed": {
       "types": "./dist/embed.d.ts",
@@ -50,6 +54,9 @@
       "types": "./dist/walk.d.ts",
       "default": "./dist/walk.js"
     }
+  },
+  "bin": {
+    "retrieval-mcp-check": "dist/checks-cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
