@@ -123,13 +123,13 @@ jobs:
             CA=(--cacert "$RUNNER_TEMP/zulip-ca.pem")
           fi
           if [ "$STATE" = opened ]; then TEXT="MCP checks failing against $ENDPOINT: $RUN_URL"; else TEXT="MCP checks passing again: $RUN_URL"; fi
-          # curl's own error text names the host, so print only its exit code.
+          # The host is masked above, so Zulip's reply and curl's errors are safe to print.
           RC=0
-          curl -s --fail -o /dev/null --max-time 60 "${CA[@]}" -u "$ZULIP_BOT_EMAIL:$ZULIP_BOT_API_KEY" \
+          STATUS=$(curl -sS -o "$RUNNER_TEMP/zulip.json" -w '%{http_code}' --max-time 60 "${CA[@]}" -u "$ZULIP_BOT_EMAIL:$ZULIP_BOT_API_KEY" \
             --data-urlencode type=direct --data-urlencode "to=$ZULIP_ALERT_TO" --data-urlencode "content=$TEXT" \
-            "$ZULIP_SITE/api/v1/messages" || RC=$?
-          if [ "$RC" -ne 0 ]; then
-            echo "::warning::The Zulip message was not sent (curl exit $RC): check that the server is reachable from this runner, and the secrets."
+            "$ZULIP_SITE/api/v1/messages") || RC=$?
+          if [ "$RC" -ne 0 ] || [ "$STATUS" != 200 ]; then
+            echo "::warning::The Zulip message was not sent (curl exit $RC, HTTP ${STATUS:-none}): $(jq -r '.msg // empty' "$RUNNER_TEMP/zulip.json" 2>/dev/null)"
             exit 1
           fi
           echo "Zulip message sent."
