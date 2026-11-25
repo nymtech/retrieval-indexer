@@ -139,7 +139,7 @@ describe('connection guard', () => {
 });
 
 describe('storeConnection', () => {
-  const url = 'postgresql://retrieval_reader:pw@db.example.com:21699/codex';
+  const url = 'postgresql://retrieval_reader:pw@db.example.com/codex';
   const ca = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n';
 
   it('passes the CA as the ssl option', () => {
