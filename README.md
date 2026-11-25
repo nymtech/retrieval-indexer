@@ -94,6 +94,15 @@ The example needs a migrated store (see [Schema and migrations](#schema-and-migr
 
 `storeConnection(url, ca?)` returns the pg options for a store. For a store with a private CA, pass the CA as PEM text and leave `sslmode` and `sslrootcert` out of the URL. Without a CA, the URL must set `sslmode`, for example `sslmode=disable` for a local store. Pass a single `pg.Client` (or PGlite), never a `pg.Pool`: the store runs `begin`, an advisory lock, and `commit` on one connection, which a pool does not guarantee.
 
+## Set up a store
+
+1. As the server admin, connected to the default database, run `bootstrap/init.sql`. It creates the `codex` database, the owner `retrieval_ddl`, the roles `retrieval_writer` and `retrieval_reader`, and their default privileges. Replace the placeholder passwords with `\password <role>`.
+2. Apply the schema with the `store-migrate` workflow (see [Schema and migrations](#schema-and-migrations)).
+3. As `retrieval_ddl`: `grant delete on chunks to retrieval_writer;`. A write run deletes the chunks that left a shard.
+4. As the server admin: `alter role retrieval_reader connection limit 20;`.
+
+Each connection string ends in the store database (`/codex`), not the server's default database. A managed server's console URI often ends in `/defaultdb`.
+
 ## Schema and migrations
 
 The schema is the SQL files in `migrations/`, applied in file order. [node-pg-migrate](https://github.com/salsita/node-pg-migrate) applies them to a shared store and records each applied file in the store's `pgmigrations` table, so a later run applies only the new files.
