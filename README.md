@@ -158,6 +158,11 @@ Each producer keeps its probe file beside its index roots, so one pull request c
 
 A probe needs at least one of `match`, `notMatch`, `isError`, `path` or `roundTrip`. Each run also checks the transport once: a single `Accept` type is refused with 406, and `GET` with 405.
 
+| Producer | Shards | Written | Probe files |
+|---|---|---|---|
+| `nymtech/nym` | `nym/docs`, `nym/code` | each push to `develop` | `documentation/mcp-probes/server.json`, `documentation/mcp-probes/retrieval.json` |
+| `nymtech/nym-vpn-client` | `nym-vpn-client/docs`, `nym-vpn-client/code` | each published `nym-vpn-v*` release, links at the tag | `.github/indexer/mcp-probes.json` |
+
 The `mcp-checks` workflow runs every producer's probe file against `https://nym.com/docs/api/mcp` each day, on a dispatch, on a push to `main`, and on each pull request. It blocks no other repository. Outside pull requests, a failure opens or updates the issue "MCP checks failing", a pass closes it, and a Zulip direct message goes out when the checks start failing and on each passing run when the `ZULIP_*` secrets are set. The server can be self-hosted: see the workflow file for its CA, the runner, and the masking of its host name.
 
 ## Develop

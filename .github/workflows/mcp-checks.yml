@@ -10,9 +10,10 @@ name: mcp-checks
 # the workflow did not run; a run that is still failing only comments on the
 # issue.
 #
-# Each producer keeps its probe files beside its index roots (nym:
-# documentation/mcp-probes/). The repository variable NYM_PROBES_REF picks the
-# nym ref to read them from (default develop).
+# Each producer keeps its probe files beside its index roots: nym in
+# documentation/mcp-probes/, nym-vpn-client in .github/indexer/mcp-probes.json.
+# The repository variables NYM_PROBES_REF and VPN_PROBES_REF pick the ref to
+# read each from (default develop).
 #
 # Zulip secrets, all optional: ZULIP_SITE (the server's base URL, for example
 # https://zulip.example.org), ZULIP_BOT_EMAIL, ZULIP_BOT_API_KEY, ZULIP_ALERT_TO
@@ -49,6 +50,7 @@ concurrency:
 env:
   ENDPOINT: ${{ inputs.endpoint || 'https://nym.com/docs/api/mcp' }}
   NYM_PROBES: https://raw.githubusercontent.com/nymtech/nym/${{ vars.NYM_PROBES_REF || 'develop' }}/documentation/mcp-probes
+  VPN_PROBES: https://raw.githubusercontent.com/nymtech/nym-vpn-client/${{ vars.VPN_PROBES_REF || 'develop' }}/.github/indexer/mcp-probes.json
 
 jobs:
   check:
@@ -71,7 +73,7 @@ jobs:
         run: |
           set -o pipefail
           RC=0
-          node dist/checks-cli.js "$ENDPOINT" "$NYM_PROBES/server.json" "$NYM_PROBES/retrieval.json" | tee "$RUNNER_TEMP/checks.txt" || RC=$?
+          node dist/checks-cli.js "$ENDPOINT" "$NYM_PROBES/server.json" "$NYM_PROBES/retrieval.json" "$VPN_PROBES" | tee "$RUNNER_TEMP/checks.txt" || RC=$?
           echo "summary=$(grep -E '^[0-9]+ passed, [0-9]+ failed' "$RUNNER_TEMP/checks.txt" | tail -1)" >> "$GITHUB_OUTPUT"
           exit "$RC"
 
