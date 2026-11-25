@@ -165,6 +165,33 @@ A probe needs at least one of `match`, `notMatch`, `isError`, `path` or `roundTr
 
 The `mcp-checks` workflow runs every producer's probe file against `https://nym.com/docs/api/mcp` each day, on a dispatch, on a push to `main`, and on each pull request. It blocks no other repository. Outside pull requests, a failure opens or updates the issue "MCP checks failing", a pass closes it, and a Zulip direct message goes out when the checks start failing and on each passing run when the `ZULIP_*` secrets are set. The server can be self-hosted: see the workflow file for its CA, the runner, and the masking of its host name.
 
+## Index a new repository
+
+A public repository becomes searchable through the docs MCP server (`search_code`, `search_docs`) when its own CI writes its shards to the public store. `nymtech/nym-vpn-client` is the template: copy its `.github/indexer/` and its two workflows, then change the names and roots. Only public content goes in the public store.
+
+1. **Add the indexer.** Copy `.github/indexer/` from nym-vpn-client: `index.mts`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `tsconfig.json`. In `index.mts`, set `REPO` to the repository name and `ROOTS` to the top-level source folders to index. Chunk ids start with `REPO`, so they cannot collide with another producer's. Keep the models: `voyage-code-3` for code and `voyage-3-large` for docs, the models the MCP route embeds queries with. In `package.json`, pin the newest release tag of this package (`github:nymtech/retrieval-indexer#v<version>`), then run `pnpm install` in `.github/indexer`.
+
+2. **Dry-run it.** From `.github/indexer`, run `node index.mts --dry-run`. It walks, chunks and checks the gates, and writes nothing. It fails on a source language that the package does not chunk and that is not on the accepted-drop list, and on a root that gives no chunks. Fix each one, or remove the root.
+
+3. **Write the probe file.** In `.github/indexer/mcp-probes.json` (format above), give each root a `path` probe whose query names a symbol that only that root defines, and add a docs probe. The dry run fails when a root has no probe, or a probe is outside `ROOTS`.
+
+4. **Choose when it writes.** A repository with a published docs site that is built from a branch writes from that branch on each push (as nym does from `develop`). A repository that users install from releases writes its newest published release, with links at the tag (as nym-vpn-client does). Keep the matching `on:` block and guard step of `cd-retrieval-store.yml`. `ci-retrieval-indexer.yml` runs the type check and the dry run on each pull request, with no secrets.
+
+5. **Set the secrets and the variable** in the repository's Actions settings. This needs admin on the repository.
+
+   | Name | Kind | Value |
+   |---|---|---|
+   | `RETRIEVAL_STORE_WRITE_URL` | secret | The `retrieval_writer` connection string, ending in `/codex`, with no `sslmode` or `sslrootcert` |
+   | `RETRIEVAL_STORE_CA_CERT` | secret | The store's CA certificate as PEM text, not base64 |
+   | `VOYAGE_API_KEY` | secret | The Voyage key |
+   | `RETRIEVAL_STORE_ENABLED` | variable | `1`. Nothing writes until it is set |
+
+6. **Merge, then run the first write.** Dispatch `cd-retrieval-store` (`gh workflow run cd-retrieval-store.yml -R nymtech/<repo> --ref <default branch>`). The first run embeds every chunk. Its last step runs the probe file against nym.com.
+
+7. **Register it here.** Add the probe file's raw URL to the `mcp-checks` workflow and a row to the producer table above, in one pull request to this repository.
+
+8. **Name it in the MCP server.** In `nymtech/nym`, add the repository to the `search_code` and `search_docs` descriptions (`documentation/docs/lib/mcp/tools.ts`) and to the coverage on the use-with-ai pages.
+
 ## Develop
 
 ```
