@@ -180,7 +180,7 @@ With `$RETRIEVAL_STORE_READ_URL` (a read-only role) and `$RETRIEVAL_STORE_CA_CER
 
 | Check | Fails when |
 |---|---|
-| Freshness | A shard's `source_rev` is not the tracked commit, and that commit is more than 2 hours old. A younger commit gives a note, because its write may still run |
+| Freshness | A shard's `source_rev` is not the tracked commit, and that commit is more than 2 hours old (the branch head's committer date, or the release's publish time). A younger commit gives a note, because its write may still run. A push of older commits keeps their old committer date, so it can fail before its write ends |
 | Coverage | A declared root holds no code chunks, a chunk is under no declared root, or a shard has no chunks |
 
 The run summary gets a coverage table: the chunk count of each shard and root. A store error is printed by its code only (`ECONNREFUSED`, `28P01`), because a driver message can name the host.

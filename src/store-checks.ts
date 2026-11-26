@@ -14,7 +14,7 @@ export interface ExpectedCommit {
   /** `develop` or the release tag, for the messages. */
   ref: string;
   sha: string;
-  /** When the commit reached the branch, or when the release was published. */
+  /** The branch head's committer date, or when the release was published. A push of older commits keeps their old date. */
   since: Date;
 }
 
