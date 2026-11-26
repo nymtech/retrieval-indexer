@@ -4,7 +4,7 @@
 // Kotlin and Swift keep a line rule until their grammars ship a loadable .wasm.
 //
 // Emits chunks shaped like the docs Chunk (title/heading/url/text/source) so the
-// same retrieval.search() works over the code index unchanged.
+// same store search works over the code index unchanged.
 
 import type { Node } from 'web-tree-sitter';
 import { startWithDocs, isRustDocOrAttribute, withTree, type Grammar } from './items.js';
@@ -29,7 +29,7 @@ const TEST_DIR = /(^|\/)(tests?|Tests|__tests__|androidTest|\w+Tests)\//;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$|(^|\/)test_[^/]*\.py$|Tests?\.(kt|swift)$|(^|\/)(tests?|test_utils)\.rs$/;
 const TEST_ITEM = new Set(['tests', 'test']);
 
-/** A test file, a file under a test directory, or a Rust `mod tests` block or `tests.rs` module. */
+/** A test file, a file under a test directory, a Rust item named `test` or `tests` (`mod tests`), or a `tests.rs` module. */
 export function isTestCode(repoPath: string, symbol: string, lang: Lang): boolean {
   return TEST_DIR.test(repoPath) || TEST_FILE.test(repoPath) || (lang === 'rust' && TEST_ITEM.has(symbol));
 }

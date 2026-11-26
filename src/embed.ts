@@ -1,8 +1,8 @@
 // Embedding step for the docs index: pluggable provider + content-hash cache.
 //
 // The provider is an interface (`EmbedProvider`) so the default (Voyage) can be
-// swapped without touching the pipeline. The cache keys vectors by SHA-256 of
-// chunk text: on a typical deploy only changed chunks hit the provider, which
+// swapped without touching the pipeline. The cache keys vectors by the model, the
+// dimension and the SHA-256 of the embed text (title, heading and text): on a typical deploy only changed chunks hit the provider, which
 // both cuts build latency and decouples the build from the embedding API's
 // uptime (an outage reuses cached vectors instead of failing).
 

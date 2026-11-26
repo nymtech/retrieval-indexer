@@ -114,9 +114,10 @@ export async function search(
 
 /**
  * A whole docs section by chunk id or deep-link URL. An oversized section was
- * split into `id~0`, `id~1`, ... parts with one url; this rejoins them in part
- * order, so a caller gets the section, not a fragment. An id match wins over a
- * url match.
+ * split into `id~0`, `id~1`, ... parts with one url; a base id or the url
+ * rejoins them in part order, so a caller gets the section, not a fragment. A
+ * part id (`id~1`) returns that part alone, under the base id. An id match wins
+ * over a url match.
  *
  * Ids are unique only as whole values, so two shards can hold the same base id
  * (one as `x`, another as `x~0`, `x~1`). The parts are taken from one shard: the

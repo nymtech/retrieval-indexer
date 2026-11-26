@@ -49,13 +49,15 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 | `@nymproject/retrieval-indexer/chunker` | Markdown docs chunker (heading-scoped, deep links) |
 | `@nymproject/retrieval-indexer/mdx` | MDX to plain text: frontmatter, partials, fence-aware strip |
 | `@nymproject/retrieval-indexer/code-chunker` | code chunker at tree-sitter item boundaries, test-code flag |
-| `@nymproject/retrieval-indexer/items` | tree-sitter item finder for Rust, TS/JS, Go, Python |
+| `@nymproject/retrieval-indexer/items` | tree-sitter item finder for Rust; the parser and doc rule the code chunker uses for Rust, TS/JS, Go and Python |
 | `@nymproject/retrieval-indexer/embed` | embedding providers, content-hash cache, bounded-concurrency batching |
 | `@nymproject/retrieval-indexer/store` | Postgres + pgvector write side (`indexShard`, `indexShards`, `storeConnection`) |
 | `@nymproject/retrieval-indexer/search` | read side (`search`, `getSection`, `modalities`, `staleShards`); loads no parser |
 | `@nymproject/retrieval-indexer/types` | shared types |
 | `@nymproject/retrieval-indexer/checks` | probe-file runner for a deployed MCP endpoint (`runChecks`, `parseProbeFile`); CLI `retrieval-mcp-check` |
 | `@nymproject/retrieval-indexer/store-checks` | freshness and coverage of each producer's shards (`storeChecks`, `githubCommits`, `formatCoverage`) |
+
+Internals: [docs/how-it-works.md](docs/how-it-works.md) explains the flow, the store write and the search, and [docs/api.md](docs/api.md) lists each export with its signature.
 
 ## Embedding providers
 
@@ -179,7 +181,7 @@ With `$RETRIEVAL_STORE_READ_URL` (a read-only role) and `$RETRIEVAL_STORE_CA_CER
 | Check | Fails when |
 |---|---|
 | Freshness | A shard's `source_rev` is not the tracked commit, and that commit is more than 2 hours old. A younger commit gives a note, because its write may still run |
-| Coverage | A declared root holds no code chunks, a chunk is under no declared root, or a docs shard is empty |
+| Coverage | A declared root holds no code chunks, a chunk is under no declared root, or a shard has no chunks |
 
 The run summary gets a coverage table: the chunk count of each shard and root. A store error is printed by its code only (`ECONNREFUSED`, `28P01`), because a driver message can name the host.
 
