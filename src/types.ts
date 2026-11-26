@@ -14,7 +14,7 @@ export interface PageRecord {
 
 /** One retrievable unit: a heading-scoped slice of a page. */
 export interface Chunk {
-  id: string; // stable, unique: `${pagePath}${#anchor}${~part}`
+  id: string; // stable, unique: docs `${repo/}${pagePath}${#anchor}${~part}`, code `${repo/}${path}#${i}`
   source: string;
   title: string; // page title
   heading: string; // section heading

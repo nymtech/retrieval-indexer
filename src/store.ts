@@ -52,7 +52,7 @@ const URL_TLS = /[?&](sslmode|sslrootcert|sslcert|sslkey)=/i;
 /**
  * pg connection options for a store. With `ca` (PEM text), pg verifies the
  * server's chain and host name, and the URL must not set TLS parameters, which
- * pg applies over `ca`. Without `ca`, the URL must set `sslmode`.
+ * pg applies over `ca`. Without `ca`, the URL must set `sslmode` or another TLS parameter.
  */
 export function storeConnection(url: string, ca?: string): StoreConnectionConfig {
   if (!ca) {

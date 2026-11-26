@@ -9,7 +9,7 @@ import type { Chunk, PageRecord } from './types.js';
 
 export interface Section {
   heading: string;
-  /** an explicit `{#id}` on the heading, or null */
+  /** an explicit `{#id}` or `[#id]` on the heading, or null */
   anchor: string | null;
   level: number;
   text: string;
@@ -20,6 +20,7 @@ export interface Section {
 // paragraph or code block is still too big, on a hard character cap so no
 // chunk can blow the retrieval budget. Tuned for ~400-600 token chunks.
 export const MAX_CHARS = 2400;
+// Exported for callers; the chunker sets no size floor.
 export const MIN_CHARS = 120;
 
 // Heading slugs whose sections are auto-generated, prose-free noise (CLI shell

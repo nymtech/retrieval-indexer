@@ -254,6 +254,56 @@ describe('chunkCodeFile', () => {
   });
 });
 
+describe('chunkCodeFile: a header of only imports', () => {
+  const shard = { source: 'nym-code', github: 'https://github.com/nymtech/nym/blob/develop' };
+  const headings = async (src: string, file: string) => (await chunkCodeFile(src, file, shard)).map((c) => c.heading);
+  const licence = ['// Copyright 2025 - Nym Technologies SA', '// SPDX-License-Identifier: Apache-2.0', ''];
+
+  it('drops a Rust licence, use lines and attributes, and keeps the ids of the items after it', async () => {
+    const src = [...licence, '#[cfg(unix)]', 'use std::os::unix;', 'use crate::{', '    a::B,', '    c::D,', '};', '', 'pub fn alpha() {}'].join('\n');
+    expect((await chunkCode(src, 'a.rs'))[0]?.importsOnly).toBe(true);
+    const chunks = await chunkCodeFile(src, 'a.rs', shard);
+    expect(chunks.map((c) => c.heading)).toEqual(['alpha']);
+    expect(chunks[0]?.id).toBe('a.rs#1');
+  });
+
+  it('keeps a Rust header with an inner doc comment or a constant', async () => {
+    expect(await headings(['//! The packet format.', 'use std::fmt;', '', 'pub fn alpha() {}'].join('\n'), 'a.rs')).toEqual(['a.rs', 'alpha']);
+    expect(await headings(['use std::fmt;', 'const LIMIT: usize = 512;', '', 'pub fn alpha() {}'].join('\n'), 'a.rs')).toEqual(['a.rs', 'alpha']);
+  });
+
+  it('drops TypeScript imports, a directive and a re-export, and keeps a JSDoc header', async () => {
+    expect(await headings(["'use client';", "import { a } from 'b';", "export { c } from './c';", '', 'export function f() {}'].join('\n'), 'a.ts')).toEqual(['f']);
+    expect(await headings(['/** The mix-fetch entry point. */', "import { a } from 'b';", '', 'export function f() {}'].join('\n'), 'a.ts')).toEqual(['a.ts', 'f']);
+  });
+
+  it('returns nothing for a barrel file of re-exports', async () => {
+    expect(await chunkCodeFile(["export * from './client';", "export { a, b } from './types';"].join('\n'), 'index.ts', shard)).toEqual([]);
+  });
+
+  it('drops a Go licence, package and imports, and keeps a package doc comment', async () => {
+    const imports = ['import (', '\t"context"', '\t"net"', ')', '', 'func Start() { run() }'];
+    expect(await headings(['/* SPDX-License-Identifier: GPL-3.0-only */', '', 'package forwarders', '', ...imports].join('\n'), 'a.go')).toEqual(['Start']);
+    expect(await headings(['// Package forwarders moves TCP and UDP through the tunnel.', 'package forwarders', '', ...imports].join('\n'), 'a.go')).toEqual(['a.go', 'Start']);
+  });
+
+  it('drops Python imports and keeps a module docstring', async () => {
+    expect(await headings(['# helper script', 'import os', 'from a import (', '    b,', ')', '', 'def f():', '    return 1'].join('\n'), 'a.py')).toEqual(['f']);
+    expect(await headings(['"""Builds the release notes."""', 'import os', '', 'def f():', '    return 1'].join('\n'), 'a.py')).toEqual(['a.py', 'f']);
+  });
+
+  it('drops a Kotlin package and imports, and keeps a header with a KDoc', async () => {
+    const body = ['', 'interface Tunnel {', '    val state: Int', '}'];
+    expect(await headings(['@file:Suppress("unused")', 'package net.nymtech.vpn.backend', '', 'import a.B', 'import c.D', ...body].join('\n'), 'a.kt')).toEqual(['Tunnel']);
+    expect(await headings(['package net.nymtech.vpn.backend', '', 'import a.B', '', '/** The tunnel. */', '', ...body].join('\n'), 'a.kt')).toEqual(['a.kt', 'Tunnel']);
+  });
+
+  it('drops a Swift file comment and imports, also inside #if', async () => {
+    const src = ['//', '//  TunnelStatus.swift', '//', 'import NetworkExtension', '#if os(iOS)', 'import UIKit', '#endif', '', 'public enum TunnelStatus: Int {', '    case connected', '}'].join('\n');
+    expect(await headings(src, 'a.swift')).toEqual(['TunnelStatus']);
+  });
+});
+
 describe('chunkCode: rust symbols', () => {
   // Each source is one item; the cases the line rule got wrong, and the reason.
   const cases: [string, string, string][] = [
