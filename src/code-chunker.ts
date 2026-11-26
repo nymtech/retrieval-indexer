@@ -21,6 +21,8 @@ export interface CodeBlock {
   symbol: string;
   /** 1-indexed */
   startLine: number;
+  /** Text before the first item that holds only package and import lines and comments that are not docs. `chunkCodeFile` drops it. */
+  importsOnly?: true;
 }
 
 const TEST_DIR = /(^|\/)(tests?|Tests|__tests__|androidTest|\w+Tests)\//;
@@ -141,7 +143,40 @@ export function langOf(file: string): Lang | null {
 interface Boundary {
   row: number;
   symbol: string;
+  importsOnly?: boolean;
 }
+
+const isPlainComment = (node: Node, doc: RegExp): boolean => /comment$/.test(node.type) && !doc.test(node.text);
+
+/**
+ * The top-level nodes that can stand before the first item and still leave the
+ * header with nothing to find: package and import lines, and comments that are
+ * not docs (a licence). A Rust `//!` and a Go package comment are docs, so a
+ * header with one is kept.
+ */
+const HEADER_NOISE: Record<Grammar, (node: Node) => boolean> = {
+  rust: (n) => ['use_declaration', 'extern_crate_declaration', 'attribute_item', 'inner_attribute_item'].includes(n.type) || isPlainComment(n, /^(\/\/[/!]|\/\*[*!])/),
+  typescript: tsHeaderNoise,
+  tsx: tsHeaderNoise,
+  javascript: tsHeaderNoise,
+  go: (n) =>
+    ['package_clause', 'import_declaration'].includes(n.type) ||
+    (n.type === 'comment' && !(n.nextNamedSibling?.type === 'package_clause' && n.nextNamedSibling.startPosition.row === n.endPosition.row + 1)),
+  python: (n) => ['import_statement', 'import_from_statement', 'future_import_statement', 'comment'].includes(n.type),
+};
+
+/** An import, a re-export (`export { a } from 'b'`), a directive (`'use strict'`), or a comment that is not JSDoc. */
+function tsHeaderNoise(n: Node): boolean {
+  if (n.type === 'import_statement') return true;
+  if (n.type === 'export_statement') return n.childForFieldName('source') !== null;
+  if (n.type === 'expression_statement') return n.namedChildCount === 1 && n.namedChildren[0]?.type === 'string';
+  return isPlainComment(n, /^\/\*\*/);
+}
+
+// The Kotlin and Swift header rule: a blank line, a package, import, or
+// `@file:` line, a Swift `#if` around imports, or a comment line that is not a
+// doc (`/**`, Swift `///`).
+const LINE_NOISE = /^\s*(?:$|(?:package|import)\s|@file:|#(?:if|elseif|else|endif)\b|\/\/(?!\/)|\/\*(?!\*)|\*)/;
 
 function treeBoundaries(root: Node, grammar: Grammar): Boundary[] {
   const out: Boundary[] = [];
@@ -201,21 +236,33 @@ function lineBoundaries(lines: string[], lang: 'kotlin' | 'swift'): Boundary[] {
  * Split a source file into { text, symbol, startLine } blocks at top-level
  * items, capping block size. A block runs from an item's doc comments to the
  * next item's, so what sits between items (`use` lines, constants) rides with
- * the item above it. Text before the first item becomes its own block.
+ * the item above it. Text before the first item becomes its own block, marked
+ * `importsOnly` when it holds nothing a search could want.
  */
 export async function chunkCode(content: string, file: string): Promise<CodeBlock[]> {
   const lang = langOf(file);
   if (!lang) return [];
   const lines = content.split('\n');
   const grammar = grammarOf(file);
-  const bounds = grammar
-    ? await withTree(content, grammar, (root) => treeBoundaries(root, grammar))
-    : lineBoundaries(lines, lang as 'kotlin' | 'swift');
-  if (bounds[0]?.row !== 0) bounds.unshift({ row: 0, symbol: '' });
+  let importsOnly: boolean;
+  let bounds: Boundary[];
+  if (grammar) {
+    [bounds, importsOnly] = await withTree(content, grammar, (root) => {
+      const found = treeBoundaries(root, grammar);
+      const firstRow = found[0]?.row ?? Infinity;
+      const header = root.namedChildren.filter((n): n is Node => n !== null && n.startPosition.row < firstRow);
+      return [found, header.every(HEADER_NOISE[grammar])] as const;
+    });
+  } else {
+    bounds = lineBoundaries(lines, lang as 'kotlin' | 'swift');
+    importsOnly = lines.slice(0, bounds[0]?.row ?? lines.length).every((line) => LINE_NOISE.test(line));
+  }
+  if (bounds[0]?.row !== 0) bounds.unshift({ row: 0, symbol: '', importsOnly });
 
   const out: CodeBlock[] = [];
   for (let b = 0; b < bounds.length; b++) {
-    const { row: start, symbol } = bounds[b]!;
+    const { row: start, symbol, importsOnly: noise } = bounds[b]!;
+    const flag = noise ? { importsOnly: true as const } : {};
     const end = bounds[b + 1]?.row ?? lines.length;
     let block = lines.slice(start, end).join('\n');
     let lineOffset = 0;
@@ -226,13 +273,13 @@ export async function chunkCode(content: string, file: string): Promise<CodeBloc
       let cut = block.lastIndexOf('\n', MAX_CHARS);
       if (cut <= 0) cut = MAX_CHARS;
       const piece = block.slice(0, cut);
-      if (piece.trim().length >= MIN_CHARS) out.push({ text: piece.trim(), symbol, startLine: start + 1 + lineOffset });
+      if (piece.trim().length >= MIN_CHARS) out.push({ text: piece.trim(), symbol, startLine: start + 1 + lineOffset, ...flag });
       // The newline at `cut` is dropped from both piece and the remainder, so
       // count it too, or every later chunk's startLine drifts low.
       lineOffset += (piece.match(/\n/g) || []).length + (block[cut] === '\n' ? 1 : 0);
       block = block.slice(cut).replace(/^\n/, '');
     }
-    if (block.trim().length >= MIN_CHARS) out.push({ text: block.trim(), symbol, startLine: start + 1 + lineOffset });
+    if (block.trim().length >= MIN_CHARS) out.push({ text: block.trim(), symbol, startLine: start + 1 + lineOffset, ...flag });
   }
   return out;
 }
@@ -244,7 +291,8 @@ export async function chunkCode(content: string, file: string): Promise<CodeBloc
  * `source` labels the shard and `github` is the repo's deep-link base
  * (`https://github.com/<org>/<repo>/blob/<ref>`). `repo`, when set, namespaces
  * the id so two repos in one store cannot mint the same one; a single-repo index
- * leaves it unset and keeps unprefixed ids.
+ * leaves it unset and keeps unprefixed ids. An `importsOnly` header is dropped,
+ * and the ids of the other chunks keep their place, so they do not change.
  */
 export async function chunkCodeFile(
   content: string,
@@ -254,7 +302,7 @@ export async function chunkCodeFile(
   const lang = langOf(repoPath);
   if (!lang) return [];
   const idPrefix = repo ? `${repo}/` : '';
-  return (await chunkCode(content, repoPath)).map((c, i) => ({
+  return (await chunkCode(content, repoPath)).flatMap((c, i) => c.importsOnly ? [] : [{
     id: `${idPrefix}${repoPath}#${i}`,
     source,
     title: repoPath,
@@ -263,7 +311,7 @@ export async function chunkCodeFile(
     text: c.text,
     lang,
     ...(isTestCode(repoPath, c.symbol, lang) && { test: true as const }),
-  }));
+  }]);
 }
 
 export { MAX_CHARS, MIN_CHARS };
