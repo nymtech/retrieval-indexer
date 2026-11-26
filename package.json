@@ -26,6 +26,10 @@
       "types": "./dist/checks.d.ts",
       "default": "./dist/checks.js"
     },
+    "./store-checks": {
+      "types": "./dist/store-checks.d.ts",
+      "default": "./dist/store-checks.js"
+    },
     "./embed": {
       "types": "./dist/embed.d.ts",
       "default": "./dist/embed.js"

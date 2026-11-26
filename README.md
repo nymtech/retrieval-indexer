@@ -55,6 +55,7 @@ Each module is a separate export, so a read-only MCP server pulls in `search` an
 | `@nymproject/retrieval-indexer/search` | read side (`search`, `getSection`, `modalities`, `staleShards`); loads no parser |
 | `@nymproject/retrieval-indexer/types` | shared types |
 | `@nymproject/retrieval-indexer/checks` | probe-file runner for a deployed MCP endpoint (`runChecks`, `parseProbeFile`); CLI `retrieval-mcp-check` |
+| `@nymproject/retrieval-indexer/store-checks` | freshness and coverage of each producer's shards (`storeChecks`, `githubCommits`, `formatCoverage`) |
 
 ## Embedding providers
 
@@ -158,12 +159,36 @@ Each producer keeps its probe file beside its index roots, so one pull request c
 
 A probe needs at least one of `match`, `notMatch`, `isError`, `path` or `roundTrip`. Each run also checks the transport once: a single `Accept` type is refused with 406, and `GET` with 405.
 
+### Store checks
+
+A probe file can also declare what its producer writes to the store:
+
+```json
+"store": { "repo": "nym", "github": "nymtech/nym", "tracks": { "branch": "develop" }, "roots": ["sdk/rust", "smolmix"] }
+```
+
+| Field | Meaning |
+|---|---|
+| `repo` | The `repo` of the producer's shards |
+| `github` | The GitHub repository the shards are built from, `owner/name` |
+| `tracks` | `{ "branch": "<name>" }`: the shards are built from the branch's head. `{ "release": "latest" }`: from the newest published release |
+| `roots` | The code roots the write walks. Keep it equal to the producer's own list: its dry run checks this |
+
+With `$RETRIEVAL_STORE_READ_URL` (a read-only role) and `$RETRIEVAL_STORE_CA_CERT` set, `retrieval-mcp-check` also runs these checks for each file with a `store` block. It reads the tracked commit from the GitHub API, with `$GITHUB_TOKEN` when it is set.
+
+| Check | Fails when |
+|---|---|
+| Freshness | A shard's `source_rev` is not the tracked commit, and that commit is more than 2 hours old. A younger commit gives a note, because its write may still run |
+| Coverage | A declared root holds no code chunks, a chunk is under no declared root, or a docs shard is empty |
+
+The run summary gets a coverage table: the chunk count of each shard and root. A store error is printed by its code only (`ECONNREFUSED`, `28P01`), because a driver message can name the host.
+
 | Producer | Shards | Written | Probe files |
 |---|---|---|---|
 | `nymtech/nym` | `nym/docs`, `nym/code` | each push to `develop` | `documentation/mcp-probes/server.json`, `documentation/mcp-probes/retrieval.json` |
 | `nymtech/nym-vpn-client` | `nym-vpn-client/docs`, `nym-vpn-client/code` | each published `nym-vpn-v*` release, links at the tag | `.github/indexer/mcp-probes.json` |
 
-The `mcp-checks` workflow runs every producer's probe file against `https://nym.com/docs/api/mcp` each day, on a dispatch, on a push to `main`, and on each pull request. It blocks no other repository. Outside pull requests, a failure opens or updates the issue "MCP checks failing", a pass closes it, and a Zulip direct message goes out when the checks start failing and on each passing run when the `ZULIP_*` secrets are set. The server can be self-hosted: see the workflow file for its CA, the runner, and the masking of its host name.
+The `mcp-checks` workflow runs every producer's probe file, and the store checks, against `https://nym.com/docs/api/mcp` each day, on a dispatch, on a push to `main`, and on each pull request. It blocks no other repository. Outside pull requests, a failure opens or updates the issue "MCP checks failing", a pass closes it, and a Zulip direct message goes out when the checks start failing and on each passing run when the `ZULIP_*` secrets are set. The server can be self-hosted: see the workflow file for its CA, the runner, and the masking of its host name.
 
 ## Index a new repository
 
@@ -173,7 +198,7 @@ A public repository becomes searchable through the docs MCP server (`search_code
 
 2. **Dry-run it.** From `.github/indexer`, run `node index.mts --dry-run`. It walks, chunks and checks the gates, and writes nothing. It fails on a source language that the package does not chunk and that is not on the accepted-drop list, and on a root that gives no chunks. Fix each one, or remove the root.
 
-3. **Write the probe file.** In `.github/indexer/mcp-probes.json` (format above), give each root a `path` probe whose query names a symbol that only that root defines, and add a docs probe. The dry run fails when a root has no probe, or a probe is outside `ROOTS`.
+3. **Write the probe file.** In `.github/indexer/mcp-probes.json` (format above), give each root a `path` probe whose query names a symbol that only that root defines, and add a docs probe. The dry run fails when a root has no probe, or a probe is outside `ROOTS`. Add a `store` block (see Store checks) with `ROOTS` as its `roots` and the ref the write tracks.
 
 4. **Choose when it writes.** A repository with a published docs site that is built from a branch writes from that branch on each push (as nym does from `develop`). A repository that users install from releases writes its newest published release, with links at the tag (as nym-vpn-client does). Keep the matching `on:` block and guard step of `cd-retrieval-store.yml`. `ci-retrieval-indexer.yml` runs the type check and the dry run on each pull request, with no secrets.
 

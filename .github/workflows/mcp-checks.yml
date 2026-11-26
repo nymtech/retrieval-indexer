@@ -15,6 +15,14 @@ name: mcp-checks
 # The repository variables NYM_PROBES_REF and VPN_PROBES_REF pick the ref to
 # read each from (default develop).
 #
+# Store checks, for each probe file with a "store" block: each shard is built
+# from the commit the producer tracks, and each declared root holds chunks.
+# They need the secrets RETRIEVAL_STORE_READ_URL (the read-only role) and
+# RETRIEVAL_STORE_CA_CERT (PEM text); with no URL they are skipped. The step
+# masks the store's host, and the runner prints a store error by its code only.
+# The check job runs on vars.CHECK_RUNNER (default ubuntu-latest); set it to a
+# runner label that can reach the store if GitHub-hosted runners cannot.
+#
 # Zulip secrets, all optional: ZULIP_SITE (the server's base URL, for example
 # https://zulip.example.org), ZULIP_BOT_EMAIL, ZULIP_BOT_API_KEY, ZULIP_ALERT_TO
 # (a JSON list of user ids or emails, for example [12345]), and ZULIP_CA_CERT
@@ -54,7 +62,7 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CHECK_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     outputs:
       summary: ${{ steps.probes.outputs.summary }}
@@ -68,10 +76,22 @@ jobs:
           version: 10.30.2
       # The prepare script builds dist/.
       - run: pnpm install --frozen-lockfile
-      - name: Run the probe files
+      - name: Run the probe files and the store checks
         id: probes
+        env:
+          RETRIEVAL_STORE_READ_URL: ${{ secrets.RETRIEVAL_STORE_READ_URL }}
+          RETRIEVAL_STORE_CA_CERT: ${{ secrets.RETRIEVAL_STORE_CA_CERT }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
+          if [ -n "${RETRIEVAL_STORE_READ_URL:-}" ]; then
+            HOST="${RETRIEVAL_STORE_READ_URL##*@}"
+            HOST="${HOST%%/*}"
+            echo "::add-mask::$HOST"
+            echo "::add-mask::${HOST%%:*}"
+          else
+            echo "RETRIEVAL_STORE_READ_URL is not set; the store checks are skipped."
+          fi
           RC=0
           node dist/checks-cli.js "$ENDPOINT" "$NYM_PROBES/server.json" "$NYM_PROBES/retrieval.json" "$VPN_PROBES" | tee "$RUNNER_TEMP/checks.txt" || RC=$?
           echo "summary=$(grep -E '^[0-9]+ passed, [0-9]+ failed' "$RUNNER_TEMP/checks.txt" | tail -1)" >> "$GITHUB_OUTPUT"

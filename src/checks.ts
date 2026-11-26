@@ -26,12 +26,25 @@ export interface Probe {
   advisory?: boolean;
 }
 
+/** What a producer writes to the store, for the store checks (store-checks.ts). */
+export interface StoreDeclaration {
+  /** The `repo` of its shards, for example `nym`. */
+  repo: string;
+  /** The GitHub repository the shards are built from, `owner/name`. */
+  github: string;
+  /** The commit the shards must be built from: a branch's head, or the newest release. */
+  tracks: { branch: string } | { release: 'latest' };
+  /** The code roots the write walks. Each must hold chunks, and no chunk may be outside them. */
+  roots: string[];
+}
+
 export interface ProbeFile {
   version: typeof PROBE_FORMAT_VERSION;
   /** The producer, for example `nym`. */
   name: string;
   /** The exact tool set that `tools/list` must return. */
   tools?: string[];
+  store?: StoreDeclaration;
   probes: Probe[];
 }
 
@@ -72,6 +85,7 @@ export function parseProbeFile(text: string, source: string): ProbeFile {
   if (file.version !== PROBE_FORMAT_VERSION) throw new Error(`${source}: probe format version ${String(file.version)}, this runner reads version ${PROBE_FORMAT_VERSION}`);
   if (typeof file.name !== 'string' || !file.name) throw new Error(`${source}: "name" must be a non-empty string`);
   if (file.tools !== undefined && !(Array.isArray(file.tools) && file.tools.every((t) => typeof t === 'string'))) throw new Error(`${source}: "tools" must be a list of names`);
+  if (file.store !== undefined) parseStore(file.store, source);
   if (!Array.isArray(file.probes) || file.probes.length === 0) throw new Error(`${source}: "probes" must be a non-empty list`);
   file.probes.forEach((p, i) => {
     const at = `${source}: probe ${i + 1}`;
@@ -88,6 +102,18 @@ export function parseProbeFile(text: string, source: string): ProbeFile {
     if (p.path && (typeof p.path.repo !== 'string' || typeof p.path.path !== 'string')) throw new Error(`${at} (${p.label}): "path" needs "repo" and "path"`);
   });
   return file as ProbeFile;
+}
+
+function parseStore(store: Partial<StoreDeclaration>, source: string): void {
+  const at = `${source}: "store"`;
+  const text = (v: unknown) => typeof v === 'string' && v.length > 0;
+  if (!text(store.repo)) throw new Error(`${at}: "repo" must be a non-empty string`);
+  if (typeof store.github !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(store.github)) throw new Error(`${at}: "github" must be owner/name`);
+  const tracks = store.tracks as Record<string, unknown> | undefined;
+  const branch = tracks && Object.keys(tracks).length === 1 && text(tracks.branch);
+  const release = tracks && Object.keys(tracks).length === 1 && tracks.release === 'latest';
+  if (!branch && !release) throw new Error(`${at}: "tracks" must be {"branch": "<name>"} or {"release": "latest"}`);
+  if (!Array.isArray(store.roots) || store.roots.length === 0 || !store.roots.every(text)) throw new Error(`${at}: "roots" must be a non-empty list of paths`);
 }
 
 /** The text of the first content block in an MCP SSE or JSON response body. */
