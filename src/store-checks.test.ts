@@ -98,6 +98,13 @@ describe('storeChecks: coverage', () => {
     expect(r?.detail).toContain('1 chunks under no root, for example clients/native-extra/main.rs');
   });
 
+  it('fails a shard with no chunks', async () => {
+    await write(HEAD, [code('sdk/rust/lib.rs'), code('clients/native/main.rs')]);
+    await db.query("delete from chunks where shard = 'nym/docs'");
+    const r = byLabel((await storeChecks(db, [file()], commits(), NOW)).results)['nym/docs: 0 chunks'];
+    expect(r?.status).toBe('fail');
+  });
+
   it('skips a probe file with no store block', async () => {
     expect(await storeChecks(db, [{ version: 1, name: 'nym', probes: [] }], commits(), NOW)).toEqual({ results: [], rows: [] });
   });

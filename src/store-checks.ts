@@ -92,10 +92,12 @@ async function freshness(db: Connection, file: ProbeFile, store: StoreDeclaratio
 
 async function coverage(db: Connection, file: ProbeFile, store: StoreDeclaration): Promise<{ results: CheckResult[]; rows: CoverageRow[] }> {
   const base = { source: file.name, group: 'Store coverage' };
-  let counts: { shard: string; modality: string; title: string; n: number }[];
+  let counts: { shard: string; title: string; n: number }[];
+  let shardRows: { shard: string; modality: string }[];
   try {
-    ({ rows: counts } = await db.query<{ shard: string; modality: string; title: string; n: number }>(
-      'select shard, modality, title, count(*)::int as n from chunks where repo = $1 group by shard, modality, title',
+    ({ rows: shardRows } = await db.query<{ shard: string; modality: string }>('select shard, modality from shards where repo = $1 order by shard', [store.repo]));
+    ({ rows: counts } = await db.query<{ shard: string; title: string; n: number }>(
+      'select shard, title, count(*)::int as n from chunks where repo = $1 group by shard, title',
       [store.repo],
     ));
   } catch (e) {
@@ -104,12 +106,10 @@ async function coverage(db: Connection, file: ProbeFile, store: StoreDeclaration
   const under = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
   const rows: CoverageRow[] = [];
   const results: CheckResult[] = [];
-  const shards = [...new Set(counts.map((c) => c.shard))].sort();
-  const codeShards = shards.filter((s) => counts.some((c) => c.shard === s && c.modality === 'code'));
-  if (codeShards.length === 0) results.push({ ...base, label: `the store holds a ${store.repo} code shard`, status: 'fail', detail: `no code chunks for repo ${store.repo}` });
-  for (const shard of shards) {
+  if (!shardRows.some((r) => r.modality === 'code')) results.push({ ...base, label: `the store holds a ${store.repo} code shard`, status: 'fail', detail: `no code shard for repo ${store.repo}` });
+  for (const { shard, modality } of shardRows) {
     const mine = counts.filter((c) => c.shard === shard);
-    if (!codeShards.includes(shard)) {
+    if (modality !== 'code') {
       const total = mine.reduce((n, c) => n + c.n, 0);
       rows.push({ shard, root: '(all)', chunks: total });
       results.push({ ...base, label: `${shard}: ${total} chunks`, status: total > 0 ? 'pass' : 'fail' });
